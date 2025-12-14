@@ -1,16 +1,20 @@
-use std::{fs, io::Read};
+use std::{cell::RefCell, io::Read, rc::Rc};
 use byteorder::ReadBytesExt;
 use crate::memory::mapper0::Mapper0;
+
+pub type SharedMapper = Rc<RefCell<Box<dyn crate::memory::mapper::Mapper>>>;
 
 pub trait Mapper {
     fn cpu_map_read(&self, addr: u16) -> u8;
     fn cpu_map_write(&mut self, addr: u16, data: u8);
+    fn ppu_map_read(&self, addr: u16) -> u8;
+    fn ppu_map_write(&mut self, addr: u16, data: u8);
 }
 
-pub fn parse_rom(path: &str) -> Box<dyn Mapper> {
-    let file = fs::File::open(path).unwrap();
-
-    let mut reader: std::io::BufReader<fs::File> = std::io::BufReader::new(file);
+pub fn parse_rom(rom_content: Vec<u8>) -> Box<dyn Mapper> {
+    let mut reader = std::io::BufReader::new(
+        std::io::Cursor::new(rom_content)
+    );
     let mut magic_buf = [0u8; 4];
     reader.read_exact(&mut magic_buf).unwrap();
     if &magic_buf != b"NES\x1A" {
@@ -35,7 +39,7 @@ pub fn parse_rom(path: &str) -> Box<dyn Mapper> {
 
     match mapper_number {
         0 => {
-            let mapper = Mapper0::new(prg_rom);
+            let mapper = Mapper0::new(prg_rom, chr_rom);
             Box::new(mapper)
         }
         _ => {

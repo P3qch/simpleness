@@ -1,26 +1,41 @@
+use crate::memory::mapper::SharedMapper;
+use crate::ppu::{self, PPU};
+
 const INTERNAL_RAM_SIZE: usize = 0x800;
 
 pub struct Bus {
     internal_ram: [u8; INTERNAL_RAM_SIZE],
-    mapper: Box<dyn crate::memory::mapper::Mapper>,
+    mapper: Option<SharedMapper>,
+    ppu: PPU,
 }
 
 // For now we only support nrom (no mapper)
 impl Bus {
-    pub fn new(mapper: Box<dyn crate::memory::mapper::Mapper>) -> Self {
+    pub fn new() -> Self {
         Self {
             internal_ram: [0xff; INTERNAL_RAM_SIZE],
-            mapper,
+            mapper: None,
+            ppu: PPU::new(),
         }
     }
 
+    pub fn set_mapper(&mut self, mapper: SharedMapper) {
+        self.mapper = Some(mapper);
+        self.ppu.set_mapper(self.mapper.as_ref().unwrap().clone());
+    }
+
     pub fn read_u8(&self, addr: u16) -> u8 {
+        if let None = self.mapper {
+            panic!("Attempted to read from bus before loading ROM");
+        }
+        let mapper = self.mapper.as_ref().unwrap().borrow();
+
         match addr {
             0x0000..=0x1FFF => {
                 self.internal_ram[addr as usize & (INTERNAL_RAM_SIZE - 1)]
             }
             _ => {
-                self.mapper.cpu_map_read(addr)
+                mapper.cpu_map_read(addr)
             }
         }
     }
@@ -45,12 +60,17 @@ impl Bus {
     }
 
     pub fn write_u8(&mut self, addr: u16, data: u8) {
+        if let None = self.mapper {
+            panic!("Attempted to write to bus before loading ROM");
+        }
+        let mut mapper = self.mapper.as_ref().unwrap().borrow_mut();
+
         match addr {
             0x0000..=0x1FFF => {
                 self.internal_ram[addr as usize & (INTERNAL_RAM_SIZE - 1)] = data;
             }
             _ => {
-                self.mapper.cpu_map_write(addr, data);
+                mapper.cpu_map_write(addr, data);
             }
         }
     }

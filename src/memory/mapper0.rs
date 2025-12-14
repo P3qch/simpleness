@@ -3,19 +3,22 @@ use crate::memory::mapper::Mapper;
 pub struct Mapper0 {
     prg_rom: Vec<u8>,
     should_mirror_prg_rom_page: bool,
+    chr_rom: Vec<u8>,
 }
 
 impl Mapper0 {
-    pub fn new(prg_rom: Vec<u8>) -> Self {
+    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>) -> Self {
         if prg_rom.len() == 0x4000 {
             Self {
                 prg_rom,
                 should_mirror_prg_rom_page: true,
+                chr_rom,
             }
         } else if prg_rom.len() == 0x8000 {
             Self {
                 prg_rom,
                 should_mirror_prg_rom_page: false,
+                chr_rom,
             }
         } else {
             panic!("Unsupported PRG ROM size: {}", prg_rom.len());
@@ -43,5 +46,33 @@ impl Mapper for Mapper0 {
 
     fn cpu_map_write(&mut self, _addr: u16, _data: u8) {
         // NROM does not support writes to PRG ROM
+    }
+    
+    fn ppu_map_read(&self, addr: u16) -> u8 {
+        match addr {
+            0x0000..=0x1FFF => {
+                let chr_rom_addr = addr as usize;
+                if chr_rom_addr < self.chr_rom.len() {
+                    self.chr_rom[chr_rom_addr]
+                } else {
+                    panic!("CHR ROM read out of bounds: {:04X}", addr);
+                }
+            }
+            _ => 0
+        }
+    }
+    
+    fn ppu_map_write(&mut self, addr: u16, data: u8) {
+        match addr {
+            0x0000..=0x1FFF => {
+                let chr_rom_addr = addr as usize;
+                if chr_rom_addr < self.chr_rom.len() {
+                    self.chr_rom[chr_rom_addr] = data;
+                } else {
+                    panic!("CHR ROM write out of bounds: {:04X}", addr);
+                }
+            }
+            _ => {}
+        }
     }
 }
