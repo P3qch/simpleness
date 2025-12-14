@@ -254,14 +254,14 @@ impl Olc6502 {
         self.push_u8((data & 0xff) as u8);
     }
 
-    fn pull_u8(&mut self) -> u8 {
+    fn pop_u8(&mut self) -> u8 {
         self.s = self.s.wrapping_add(1);
         self.bus.read_u8(0x0100 | (self.s as u16))
     }
 
     fn pull_u16(&mut self) -> u16 {
-        let lo = self.pull_u8() as u16;
-        let hi = self.pull_u8() as u16;
+        let lo = self.pop_u8() as u16;
+        let hi = self.pop_u8() as u16;
         (hi << 8) | lo
     }
 
@@ -508,12 +508,12 @@ impl Olc6502 {
     }
 
     fn inst_pla(&mut self) {
-        self.a = self.pull_u8();
+        self.a = self.pop_u8();
         self.set_zn_flags(self.a);
     }
 
     fn inst_plp(&mut self) {
-        let status = self.pull_u8();
+        let status = self.pop_u8();
         self.p = StatusFlags::from_bits_truncate(status);
         self.p.insert(StatusFlags::U);
         self.p.remove(StatusFlags::B);
@@ -562,7 +562,7 @@ impl Olc6502 {
     }
 
     fn inst_rti(&mut self) {
-        let status = self.pull_u8();
+        let status = self.pop_u8();
         self.p = StatusFlags::from_bits_truncate(status);
         self.p.remove(StatusFlags::B);
         self.p.insert(StatusFlags::U);
