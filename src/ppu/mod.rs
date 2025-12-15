@@ -86,7 +86,7 @@ impl PPU {
         }
     }
 
-    pub fn get_pixel_buffer(&self) -> &Vec<u8> {
+    pub fn get_pixel_buffer(&self) -> &[u8] {
         &self.screen_pixelbuffer
     }
 
@@ -154,6 +154,8 @@ impl PPU {
                     if self.ppu_ctrl.vblank_nmi_enable() == 0 && new_val.vblank_nmi_enable() == 1 && self.ppu_status.vblank() == 1 {
                         self.call_nmi();
                     }
+
+                    self.ppu_ctrl = new_val;
                 }
             }
             PPUADDR => {
@@ -177,16 +179,6 @@ impl PPU {
         let pallette_table_address = 0x3F00;
 
         let current_pixel_x = (self.current_cycle % 341) as u16;
-
-        if self.current_scanline == 241 && current_pixel_x == 1 {
-            // Entering VBlank
-            self.ppu_status.set_vblank(1);
-
-            if self.ppu_ctrl.vblank_nmi_enable() == 1 {
-                self.call_nmi();
-            }
-        }
-
         let current_pixel_y = self.current_scanline as u16;
         
         let current_tile_x = current_pixel_x / 8; // value between 0 and 32
@@ -202,21 +194,24 @@ impl PPU {
             // We want to get the matching pallette for the nametable entry
             let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
             let attribute_byte = self.ppu_bus.read_u8(attribute_table_address + attribute_table_index);
-            let quadrant = ((current_tile_y % 2) << 1) + (current_pixel_x % 2);
+            let quadrant = ((current_tile_y % 2) << 1) + (current_tile_x % 2);
             let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11; 
-            let pallette = self.ppu_bus.read_buffer(pallette_table_address as u16 + (pallette_table_index as u16 * 4), 4);
+            let pallette_address = pallette_table_address as u16 + (pallette_table_index as u16 * 4);
 
             // The nametable entry indexes the pattern table
             let pattern_table_index = nametable_entry as u16;
-            let pattern_lsb = self.ppu_bus.read_buffer(pattern_table_address + (pattern_table_index * 16 + 0) , 8);
-            let pattern_msb = self.ppu_bus.read_buffer(pattern_table_address + (pattern_table_index * 16 + 8) , 8);
+            let pattern_lsb_address = pattern_table_address + (pattern_table_index * 16 + 0) + (current_pixel_y as u16 % 8);
+            let pattern_msb_address = pattern_table_address + (pattern_table_index * 16 + 8) + (current_pixel_y as u16 % 8);
+
+            let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
+            let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
 
             fn select_bit_n(x: usize, n: usize) -> usize { (x >> (7 - n)) & 1 }
-            let current_pixel_color_lsb = select_bit_n(pattern_lsb[current_pixel_y as usize % 8] as usize, current_pixel_x as usize % 8);
-            let current_pixel_color_msb = select_bit_n(pattern_msb[current_pixel_y as usize % 8] as usize, current_pixel_x as usize  % 8);
+            let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb as usize, current_pixel_x as usize % 8);
+            let current_pixel_color_msb = select_bit_n(pattern_byte_msb as usize, current_pixel_x as usize % 8);
             let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
 
-            let pallette_value = pallette[pixel_color as usize];
+            let pallette_value = self.ppu_bus.read_u8(pallette_address + pixel_color as u16);
 
 
             let actual_pixel_color = COLORS[pallette_value as usize];
@@ -225,6 +220,13 @@ impl PPU {
             self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 1] = actual_pixel_color.1;
             self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 2] = actual_pixel_color.2;
             self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 3] = 0xff;
+        } else if self.current_scanline == 241 && current_pixel_x == 1 {
+            // Entering VBlank
+            self.ppu_status.set_vblank(1);
+
+            if self.ppu_ctrl.vblank_nmi_enable() == 1 {
+                self.call_nmi();
+            }
         }
 
         self.current_cycle += 1;

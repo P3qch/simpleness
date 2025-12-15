@@ -39,7 +39,7 @@ const HEIGHT: u32 = 240;
 fn main() {
     let mut bus = memory::bus::Bus::new();
 
-    let rom_content = std::fs::read("roms/nestest.nes").expect("Failed to read ROM file");
+    let rom_content = std::fs::read("roms/donkey kong.nes").expect("Failed to read ROM file");
     let mapper = memory::mapper::parse_rom(rom_content);
 
     bus.set_mapper(Rc::new(RefCell::new(mapper)));

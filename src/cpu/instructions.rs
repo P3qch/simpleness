@@ -1,5 +1,7 @@
 use std::fmt::Display;
 use crate::cpu::olc6502::Olc6502;
+use std::collections::HashMap;
+use lazy_static::lazy_static;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum AddressingMode {
@@ -56,7 +58,7 @@ impl AddressingMode {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Instruction {
     ADC,
     AND,
@@ -118,65 +120,7 @@ pub enum Instruction {
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let instr_str = match self {
-            Instruction::ADC => "ADC",
-            Instruction::AND => "AND",
-            Instruction::ASL => "ASL",
-            Instruction::BCC => "BCC",
-            Instruction::BCS => "BCS",
-            Instruction::BEQ => "BEQ",
-            Instruction::BIT => "BIT",
-            Instruction::BMI => "BMI",
-            Instruction::BNE => "BNE",
-            Instruction::BPL => "BPL",
-            Instruction::BRK => "BRK",
-            Instruction::BVC => "BVC",
-            Instruction::BVS => "BVS",
-            Instruction::CLC => "CLC",
-            Instruction::CLD => "CLD",
-            Instruction::CLI => "CLI",
-            Instruction::CLV => "CLV",
-            Instruction::CMP => "CMP",
-            Instruction::CPX => "CPX",
-            Instruction::CPY => "CPY",
-            Instruction::DEC => "DEC",
-            Instruction::DEX => "DEX",
-            Instruction::DEY => "DEY",
-            Instruction::EOR => "EOR",
-            Instruction::INC => "INC",
-            Instruction::INX => "INX",
-            Instruction::INY => "INY",
-            Instruction::JMP => "JMP",
-            Instruction::JSR => "JSR",
-            Instruction::LDA => "LDA",
-            Instruction::LDX => "LDX",
-            Instruction::LDY => "LDY",
-            Instruction::LSR => "LSR",
-            Instruction::NOP => "NOP",
-            Instruction::ORA => "ORA",
-            Instruction::PHA => "PHA",
-            Instruction::PHP => "PHP",
-            Instruction::PLA => "PLA",
-            Instruction::PLP => "PLP",
-            Instruction::ROL => "ROL",
-            Instruction::ROR => "ROR",
-            Instruction::RTI => "RTI",
-            Instruction::RTS => "RTS",
-            Instruction::SBC => "SBC",
-            Instruction::SEC => "SEC",
-            Instruction::SED => "SED",
-            Instruction::SEI => "SEI",
-            Instruction::STA => "STA",
-            Instruction::STX => "STX",
-            Instruction::STY => "STY",
-            Instruction::TAX => "TAX",
-            Instruction::TAY => "TAY",
-            Instruction::TSX => "TSX",
-            Instruction::TXA => "TXA",
-            Instruction::TXS => "TXS",
-            Instruction::TYA => "TYA",
-        };
-        write!(f, "{}", instr_str)
+        write!(f, "{}", INSTRUCTION_NAME_MAP.get(self).unwrap())
     }
 }
 
@@ -189,7 +133,79 @@ pub struct Opcode {
     pub cross_cycle: bool
 }
 
-pub const OPCODES: &[Opcode] = &[
+lazy_static! {
+    pub static ref OPCODE_MAP: HashMap<u8, Opcode> = {
+        let mut m = HashMap::new();
+        for op in OPCODES.iter() {
+            m.insert(op.code, *op); // assuming Opcode is Copy
+        }
+        m        
+    };
+
+    static ref INSTRUCTION_NAME_MAP: HashMap<Instruction, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert(Instruction::ADC, "ADC");
+        m.insert(Instruction::AND, "AND");
+        m.insert(Instruction::ASL, "ASL");
+        m.insert(Instruction::BCC, "BCC");
+        m.insert(Instruction::BCS, "BCS");
+        m.insert(Instruction::BEQ, "BEQ");
+        m.insert(Instruction::BIT, "BIT");
+        m.insert(Instruction::BMI, "BMI");
+        m.insert(Instruction::BNE, "BNE");
+        m.insert(Instruction::BPL, "BPL");
+        m.insert(Instruction::BRK, "BRK");
+        m.insert(Instruction::BVC, "BVC");
+        m.insert(Instruction::BVS, "BVS");
+        m.insert(Instruction::CLC, "CLC");
+        m.insert(Instruction::CLD, "CLD");
+        m.insert(Instruction::CLI, "CLI");
+        m.insert(Instruction::CLV, "CLV");
+        m.insert(Instruction::CMP, "CMP");
+        m.insert(Instruction::CPX, "CPX");
+        m.insert(Instruction::CPY, "CPY");
+        m.insert(Instruction::DEC, "DEC");
+        m.insert(Instruction::DEX, "DEX");
+        m.insert(Instruction::DEY, "DEY");
+        m.insert(Instruction::EOR, "EOR");
+        m.insert(Instruction::INC, "INC");
+        m.insert(Instruction::INX, "INX");
+        m.insert(Instruction::INY, "INY");
+        m.insert(Instruction::JMP, "JMP");
+        m.insert(Instruction::JSR, "JSR");
+        m.insert(Instruction::LDA, "LDA");
+        m.insert(Instruction::LDX, "LDX");
+        m.insert(Instruction::LDY, "LDY");
+        m.insert(Instruction::LSR, "LSR");
+        m.insert(Instruction::NOP, "NOP");
+        m.insert(Instruction::ORA, "ORA");
+        m.insert(Instruction::PHA, "PHA");
+        m.insert(Instruction::PHP, "PHP");
+        m.insert(Instruction::PLA, "PLA");
+        m.insert(Instruction::PLP, "PLP");
+        m.insert(Instruction::ROL, "ROL");
+        m.insert(Instruction::ROR, "ROR");
+        m.insert(Instruction::RTI, "RTI");
+        m.insert(Instruction::RTS, "RTS");
+        m.insert(Instruction::SBC, "SBC");
+        m.insert(Instruction::SEC, "SEC");
+        m.insert(Instruction::SED, "SED");
+        m.insert(Instruction::SEI, "SEI");
+        m.insert(Instruction::STA, "STA");
+        m.insert(Instruction::STX, "STX");
+        m.insert(Instruction::STY, "STY");
+        m.insert(Instruction::TAX, "TAX");
+        m.insert(Instruction::TAY, "TAY");
+        m.insert(Instruction::TSX, "TSX");
+        m.insert(Instruction::TXA, "TXA");
+        m.insert(Instruction::TXS, "TXS");
+        m.insert(Instruction::TYA, "TYA");
+ 
+        m        
+    };
+}
+
+const OPCODES: &[Opcode] = &[
     // ADC
     Opcode { code: 0x69,  instr: Instruction::ADC, mode: AddressingMode::Imm, cycles: 2, cross_cycle: false},
     Opcode { code: 0x65,  instr: Instruction::ADC, mode: AddressingMode::Zpg, cycles: 3, cross_cycle: false},
@@ -454,6 +470,5 @@ pub const OPCODES: &[Opcode] = &[
 
     // TYA
     Opcode { code: 0x98, instr: Instruction::TYA, mode: AddressingMode::Impl, cycles: 2, cross_cycle: false },
-
-    
     ];
+

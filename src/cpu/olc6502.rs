@@ -1,5 +1,5 @@
 use crate::memory::bus::Bus;
-use crate::cpu::instructions::{AddressingMode, Instruction, OPCODES};
+use crate::cpu::instructions::{AddressingMode, Instruction, OPCODE_MAP};
 use bitflags::bitflags;
 
 const NMI_ADDRESS: u16 = 0xfffa;
@@ -61,6 +61,9 @@ impl Olc6502 {
         if self.bus.ppu.should_nmi {
             self.bus.ppu.should_nmi = false;
             self.nmi();
+            for _ in 0..6 {
+                self.bus.ppu.tick();
+            }
         }
     }
 
@@ -83,14 +86,13 @@ impl Olc6502 {
         self.push_u8(self.p.bits() | StatusFlags::I.bits()); // we gotta add this B flag here
         self.p.insert(StatusFlags::I);
         self.pc = self.bus.read_u16(NMI_ADDRESS);
+        self.cycles += 2;
     }
 
     pub fn execute_instruction(&mut self) -> u64 {
         let current_byte = self.bus.read_u8(self.pc);
         
-        let opcode_option = OPCODES
-            .iter()
-            .find(|&opcode| opcode.code == current_byte);
+        let opcode_option = OPCODE_MAP.get(&current_byte);
 
         let opcode;
         match opcode_option {
@@ -102,21 +104,21 @@ impl Olc6502 {
         self.pc += 1;
         let old_cycles = self.cycles;
         self.handle_addressing(opcode.mode, opcode.cross_cycle);
-        println!(
-            "{:04X}  {:02X} {} {}  {} {:28}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
-            old_pc,
-            opcode_bytes[0],
-            if opcode.mode.size() > 1 {format!("{:02X}", opcode_bytes[1])} else {String::from("  ")},
-            if opcode.mode.size() > 2 {format!("{:02X}", opcode_bytes[2])} else {String::from("  ")} ,
-            format!("{}", opcode.instr),
-            opcode.mode.format_operand(self.operand, self),
-            self.a,
-            self.x,
-            self.y,
-            self.p.bits(),
-            self.s,
-            old_cycles
-        );
+        // println!(
+        //     "{:04X}  {:02X} {} {}  {} {:28}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
+        //     old_pc,
+        //     opcode_bytes[0],
+        //     if opcode.mode.size() > 1 {format!("{:02X}", opcode_bytes[1])} else {String::from("  ")},
+        //     if opcode.mode.size() > 2 {format!("{:02X}", opcode_bytes[2])} else {String::from("  ")} ,
+        //     format!("{}", opcode.instr),
+        //     opcode.mode.format_operand(self.operand, self),
+        //     self.a,
+        //     self.x,
+        //     self.y,
+        //     self.p.bits(),
+        //     self.s,
+        //     old_cycles
+        // );
 
         match opcode.instr {
             Instruction::ADC => self.inst_adc(),
