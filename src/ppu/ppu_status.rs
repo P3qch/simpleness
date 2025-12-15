@@ -3,9 +3,9 @@ use modular_bitfield::prelude::*;
 #[bitfield(bits = 8)]
 #[derive(Clone, Copy, Debug)]
 pub struct PPUStatus {
-    ppu_identifier: B5,
-    sprite_overflow: B1,
-    sprite_zero_hit: B1,
-    vblank: B1,
+    pub ppu_identifier: B5,
+    pub sprite_overflow: B1,
+    pub sprite_zero_hit: B1,
+    pub vblank: B1,
 }
 

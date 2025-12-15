@@ -63,4 +63,14 @@ impl PPUBus {
             _ => {}
         }
     }
+
+    pub fn read_buffer(&self, addr: u16, length: u16) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(length as usize);
+        for i in 0..length {
+            buffer.push(self.read_u8(addr.wrapping_add(i)));
+        }
+        buffer
+    }
+
+
 }
