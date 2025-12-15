@@ -53,6 +53,22 @@ impl Olc6502 {
         }
     }
 
+    pub fn tick(&mut self) {
+        let cpu_cycles_ran = self.execute_instruction();
+        for _ in 0..cpu_cycles_ran * 3 {
+            self.bus.ppu.tick();
+        }
+        if self.bus.ppu.should_nmi {
+            self.bus.ppu.should_nmi = false;
+            self.nmi();
+        }
+    }
+
+    pub fn frame_ready(&mut self) -> bool { 
+        self.bus.ppu.frame_ready()
+
+    }
+
     pub fn reset(&mut self) {
         self.pc = self.bus.read_u16(RESET_ADDRESS);
         self.a = 0;
@@ -61,8 +77,15 @@ impl Olc6502 {
         self.s -= 3;
         self.p |= StatusFlags::I;
     }
+    
+    pub fn nmi(&mut self) {
+        self.push_u16(self.pc);
+        self.push_u8(self.p.bits() | StatusFlags::I.bits()); // we gotta add this B flag here
+        self.p.insert(StatusFlags::I);
+        self.pc = self.bus.read_u16(NMI_ADDRESS);
+    }
 
-    pub fn execute_instruction(&mut self) {
+    pub fn execute_instruction(&mut self) -> u64 {
         let current_byte = self.bus.read_u8(self.pc);
         
         let opcode_option = OPCODES
@@ -72,7 +95,7 @@ impl Olc6502 {
         let opcode;
         match opcode_option {
             Some(op) => opcode = op,
-            None => return
+            None => panic!("Unknown opcode: {:02X} at PC: {:04X}", current_byte, self.pc),
         }
         let opcode_bytes = self.bus.read_buffer(self.pc, opcode.mode.size() as u16);
         let old_pc = self.pc;
@@ -86,7 +109,7 @@ impl Olc6502 {
             if opcode.mode.size() > 1 {format!("{:02X}", opcode_bytes[1])} else {String::from("  ")},
             if opcode.mode.size() > 2 {format!("{:02X}", opcode_bytes[2])} else {String::from("  ")} ,
             format!("{}", opcode.instr),
-            opcode.mode.format_operand(self.operand, &self),
+            opcode.mode.format_operand(self.operand, self),
             self.a,
             self.x,
             self.y,
@@ -155,6 +178,8 @@ impl Olc6502 {
         }
 
         self.cycles += opcode.cycles as u64;
+
+        self.cycles - old_cycles
     }
 
     fn handle_addressing(&mut self, am: AddressingMode, cross_cycle: bool) {
@@ -259,7 +284,7 @@ impl Olc6502 {
         self.bus.read_u8(0x0100 | (self.s as u16))
     }
 
-    fn pull_u16(&mut self) -> u16 {
+    fn pop_u16(&mut self) -> u16 {
         let lo = self.pop_u8() as u16;
         let hi = self.pop_u8() as u16;
         (hi << 8) | lo
@@ -564,13 +589,15 @@ impl Olc6502 {
     fn inst_rti(&mut self) {
         let status = self.pop_u8();
         self.p = StatusFlags::from_bits_truncate(status);
+        // there is no need to remove the I flag as it wasn't enabled when the register
+        // was pushed to the stack.
         self.p.remove(StatusFlags::B);
         self.p.insert(StatusFlags::U);
-        self.pc = self.pull_u16();   
+        self.pc = self.pop_u16();   
     }
 
     fn inst_rts(&mut self) {
-        self.pc = self.pull_u16().wrapping_add(1);
+        self.pc = self.pop_u16().wrapping_add(1);
     }
 
     fn inst_sbc(&mut self) {

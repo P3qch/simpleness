@@ -12,7 +12,6 @@ impl PPUBus {
             mapper: None,
             nametable_ram: [0; 0x1000],
             pallette_ram: [0; 0x20],
-
         }
     }
 
@@ -71,6 +70,4 @@ impl PPUBus {
         }
         buffer
     }
-
-
 }

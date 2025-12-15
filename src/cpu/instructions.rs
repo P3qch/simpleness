@@ -37,7 +37,7 @@ impl AddressingMode {
         }
     }
 
-    pub fn format_operand(&self, operand: u16, cpu: &Olc6502) -> String {
+    pub fn format_operand(&self, operand: u16, cpu: &mut Olc6502) -> String {
         match self {
             AddressingMode::Acc => String::from("A"),
             AddressingMode::Abs => format!("${:04X}", operand),

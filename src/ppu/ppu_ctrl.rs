@@ -13,6 +13,9 @@ pub struct PPUCtrl {
 }
 
 impl PPUCtrl {
+    /**
+     * Resolves the asctual nametable address using the base_nametable_address field
+     */
     pub fn get_base_nametable_address(&self) -> u16 {
         match self.base_nametable_address() {
             0 => 0x2000,
