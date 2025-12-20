@@ -173,10 +173,7 @@ impl PPU {
     }   
 
     pub fn tick(&mut self) {
-        let nametable_address = self.ppu_ctrl.get_base_nametable_address();        
-        let attribute_table_address = nametable_address + 0x03C0;
-        let pattern_table_address = self.ppu_ctrl.get_pattern_table_address(); 
-        let pallette_table_address = 0x3F00;
+
 
         let current_pixel_x = (self.current_cycle % 341) as u16;
         let current_pixel_y = self.current_scanline as u16;
@@ -186,6 +183,10 @@ impl PPU {
 
         if current_pixel_y < 240 && current_pixel_x < 256 {
             // Visible scanlines
+            let nametable_address = self.ppu_ctrl.get_base_nametable_address();        
+            let attribute_table_address = nametable_address + 0x03C0;
+            let pattern_table_address = self.ppu_ctrl.get_pattern_table_address(); 
+            let pallette_table_address = 0x3F00;
 
             // First we get the nametable entry for the current pixel
             let nametable_index = current_tile_x + current_tile_y * 32;

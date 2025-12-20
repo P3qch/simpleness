@@ -64,9 +64,19 @@ fn main() {
         *control_flow = ControlFlow::Poll;
 
         match event {
+            Event::MainEventsCleared => {
+                while !cpu.bus.ppu.frame_ready() {
+                    cpu.tick();
+                }
+                window.request_redraw();
+            }
+
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::Resized(size) => {
+                    pixels.resize_surface(size.width, size.height).unwrap();
                 }
                 _ => {}
             },
@@ -79,13 +89,6 @@ fn main() {
                 if pixels.render().is_err() {
                     *control_flow = ControlFlow::Exit;
                 }
-            }
-
-            Event::MainEventsCleared => {
-                while !cpu.bus.ppu.frame_ready() {
-                    cpu.tick();
-                }
-                window.request_redraw();
             }
 
             _ => {}
