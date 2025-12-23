@@ -177,6 +177,12 @@ impl PPU {
                 }
             }
 
+            PPUMASK => {
+                if self.had_pre_render_scanline {
+                    self.ppu_mask = PPUMask::from_bytes([value]);
+                }
+            }
+
             OAMADDR => {
                 // Sets the OAM address for subsequent OAMDATA writes
                 // Not implemented yet
@@ -226,47 +232,9 @@ impl PPU {
         let current_tile_y = current_pixel_y / 8; // value between 0 and 30
 
         if current_pixel_y < 240 && current_pixel_x < 256 {
-            // Visible scanlines
-            let nametable_address = self.ppu_ctrl.get_base_nametable_address();        
-            let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
-            let pattern_table_address = self.ppu_ctrl.get_pattern_table_address(); 
-
-            // First we get the nametable entry for the current pixel
-            let nametable_index = current_tile_x + current_tile_y * 32;
-            let nametable_entry = self.ppu_bus.read_u8(nametable_address + nametable_index);
-
-            // We want to get the matching pallette for the nametable entry
-            let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
-            let attribute_byte = self.ppu_bus.read_u8(attribute_table_address + attribute_table_index);
-            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
-            let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11; 
-            let pallette_address = PALLETTE_TABLE_START + (pallette_table_index as u16 * 4);
-
-            // The nametable entry indexes the pattern table
-            let pattern_table_index = nametable_entry as u16;
-            let pattern_lsb_address = pattern_table_address + (pattern_table_index * 16 + 0) + (current_pixel_y as u16 % 8);
-            let pattern_msb_address = pattern_table_address + (pattern_table_index * 16 + 8) + (current_pixel_y as u16 % 8);
-
-            let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
-            let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
-
-            fn select_bit_n(x: usize, n: usize) -> usize { (x >> (7 - n)) & 1 }
-            let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb as usize, current_pixel_x as usize % 8);
-            let current_pixel_color_msb = select_bit_n(pattern_byte_msb as usize, current_pixel_x as usize % 8);
-            let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
-
-            let pallette_value = if pixel_color % 4 == 0 {
-                self.ppu_bus.read_u8(pallette_address + 0)
-            } else {
-                self.ppu_bus.read_u8(pallette_address + pixel_color as u16)
-            };
-
-            let actual_pixel_color = COLORS[pallette_value as usize];
-
-            self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 0] = actual_pixel_color.0;
-            self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 1] = actual_pixel_color.1;
-            self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 2] = actual_pixel_color.2;
-            self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 3] = 0xff;
+            if self.ppu_mask.show_background() == 1 {
+                self.render_background(current_pixel_x, current_pixel_y, current_tile_x, current_tile_y);
+            }
         } else if self.current_scanline == 241 && current_pixel_x == 1 {
             // Entering VBlank
             self.ppu_status.set_vblank(1);
@@ -294,5 +262,53 @@ impl PPU {
                 self.informed_frame_ready = false;
             }
         }
+    }
+
+    fn render_background(&mut self, current_pixel_x: u16, current_pixel_y: u16, current_tile_x: u16, current_tile_y: u16) {
+        // Visible scanlines
+        let nametable_address = self.ppu_ctrl.get_base_nametable_address();
+        let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
+        let pattern_table_address = self.ppu_ctrl.get_pattern_table_address();
+    
+        // First we get the nametable entry for the current pixel
+        let nametable_index = current_tile_x + current_tile_y * 32;
+        let nametable_entry = self.ppu_bus.read_u8(nametable_address + nametable_index);
+    
+        // We want to get the matching pallette for the nametable entry
+        let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
+        let attribute_byte = self.ppu_bus.read_u8(attribute_table_address + attribute_table_index);
+        let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
+        let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
+        let pallette_address = PALLETTE_TABLE_START + (pallette_table_index as u16 * 4);
+    
+        // The nametable entry indexes the pattern table
+        let pattern_table_index = nametable_entry as u16;
+        let pattern_lsb_address = pattern_table_address + (pattern_table_index * 16 + 0) + (current_pixel_y as u16 % 8);
+        let pattern_msb_address = pattern_table_address + (pattern_table_index * 16 + 8) + (current_pixel_y as u16 % 8);
+    
+        let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
+        let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
+    
+        fn select_bit_n(x: usize, n: usize) -> usize { (x >> (7 - n)) & 1 }
+        let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb as usize, current_pixel_x as usize % 8);
+        let current_pixel_color_msb = select_bit_n(pattern_byte_msb as usize, current_pixel_x as usize % 8);
+        let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
+    
+        let mut pallette_value = if pixel_color % 4 == 0 {
+            self.ppu_bus.read_u8(pallette_address + 0)
+        } else {
+            self.ppu_bus.read_u8(pallette_address + pixel_color as u16)
+        };
+        
+        if self.ppu_mask.grayscale() == 1 {
+            pallette_value &= 0x30;
+        }
+
+        let actual_pixel_color = COLORS[pallette_value as usize];
+    
+        self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 0] = actual_pixel_color.0;
+        self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 1] = actual_pixel_color.1;
+        self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 2] = actual_pixel_color.2;
+        self.screen_pixelbuffer[current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 3] = 0xff;
     }
 }
