@@ -3,6 +3,7 @@ mod ppu_ctrl;
 mod ppu_mask;
 mod ppu_status;
 mod address_register;
+mod oam_sprite;
 
 use std::vec;
 
@@ -12,13 +13,21 @@ use ppu_mask::PPUMask;
 use ppu_status::PPUStatus;
 use address_register::AddressRegister;
 
-use crate::memory::mapper::SharedMapper;
+use crate::{WIDTH, memory::mapper::SharedMapper};
 
 const PPUCTRL: u16 = 0x2000;
 const PPUMASK: u16 = 0x2001;
 const PPUSTATUS: u16 = 0x2002;
+const OAMADDR: u16 = 0x2003;
+const OAMDATA: u16 = 0x2004;
+const PPUSCROLL: u16 = 0x2005;
 const PPUADDR: u16 = 0x2006;
 const PPUDATA: u16 = 0x2007;
+pub const OAMDMA: u16 = 0x4014;
+
+const PALLETTE_TABLE_START: u16 = 0x3F00;
+const PALLETTE_TABLE_END: u16 = 0x3FFF;
+const ATTRIBUTE_TABLE_OFFSET: u16 = 0x03C0; 
 
 const COLORS: [(u8,u8,u8); 64] = [
     (84, 84, 84),   (0, 30, 116),  (8, 16, 144),  (48, 0, 136),
@@ -43,8 +52,6 @@ const COLORS: [(u8,u8,u8); 64] = [
 ];
 
 pub struct PPU {
-    write_latch: u8, //Toggles on each write to either PPUSCROLL or PPUADDR, indicating whether this is the first or second write. Clears on reads of PPUSTATUS. Sometimes called the 'write latch' or 'write toggle'.
-    
     ppu_ctrl: PPUCtrl,
     ppu_mask: PPUMask,
     ppu_status: PPUStatus,
@@ -61,6 +68,9 @@ pub struct PPU {
     screen_pixelbuffer: Vec<u8>,
     informed_frame_ready: bool,
     pub should_nmi: bool,
+
+    oam_data: [u8; 0x100],
+    oam_addr: u8,
 }
 
 impl PPU {
@@ -69,7 +79,6 @@ impl PPU {
         let ppu_ctrl = PPUCtrl::from_bytes([0]);
         let ppu_status = PPUStatus::from_bytes([0]); 
         Self {
-            write_latch: 0,
             ppu_status: ppu_status,
             ppu_ctrl: ppu_ctrl,
             ppu_mask: ppu_mask,
@@ -83,6 +92,8 @@ impl PPU {
             screen_pixelbuffer: vec![0; 240*256*4],
             informed_frame_ready: false,
             should_nmi: false,
+            oam_data: [0; 0x100],
+            oam_addr: 0,
         }
     }
 
@@ -120,6 +131,12 @@ impl PPU {
 
                 result
             }
+
+            OAMDATA => {
+                // Reads a byte from OAM at the current OAM address
+                self.oam_data[self.oam_addr as usize]
+            }
+
             PPUDATA => {
                 /*
                 The PPUDATA read buffer
@@ -141,6 +158,7 @@ impl PPU {
                     _ => old_internal_buffer
                 }   
             }
+
             _ => 0,
         }
     }
@@ -158,9 +176,32 @@ impl PPU {
                     self.ppu_ctrl = new_val;
                 }
             }
+
+            OAMADDR => {
+                // Sets the OAM address for subsequent OAMDATA writes
+                // Not implemented yet
+            
+                self.oam_addr = value;
+            }
+
+            OAMDATA => {
+                // Writes a byte to OAM at the current OAM address, then increments the OAM address
+                
+                if !self.is_rendering() {
+                    self.oam_data[self.oam_addr as usize] = value;
+                    self.oam_addr = self.oam_addr.wrapping_add(1);
+                } 
+
+            }
+
+            PPUSCROLL => {
+                // TODO: Not implemented yet 
+            }
+
             PPUADDR => {
                 self.ppu_addr.update(value, &mut self.w);
             }
+
             PPUDATA => {
                 let addr = self.ppu_addr.get_address();
                 self.ppu_bus.write_u8(addr, value);
@@ -168,13 +209,16 @@ impl PPU {
                 let increment = self.ppu_ctrl.get_increment_value();
                 self.ppu_addr.increment(increment);
             }
+
             _ => {}
         }
     }   
 
+    fn is_rendering(&self) -> bool {
+        self.current_scanline >= 0 && self.current_scanline < 240
+    }
+
     pub fn tick(&mut self) {
-
-
         let current_pixel_x = (self.current_cycle % 341) as u16;
         let current_pixel_y = self.current_scanline as u16;
         
@@ -184,9 +228,8 @@ impl PPU {
         if current_pixel_y < 240 && current_pixel_x < 256 {
             // Visible scanlines
             let nametable_address = self.ppu_ctrl.get_base_nametable_address();        
-            let attribute_table_address = nametable_address + 0x03C0;
+            let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
             let pattern_table_address = self.ppu_ctrl.get_pattern_table_address(); 
-            let pallette_table_address = 0x3F00;
 
             // First we get the nametable entry for the current pixel
             let nametable_index = current_tile_x + current_tile_y * 32;
@@ -195,9 +238,9 @@ impl PPU {
             // We want to get the matching pallette for the nametable entry
             let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
             let attribute_byte = self.ppu_bus.read_u8(attribute_table_address + attribute_table_index);
-            let quadrant = ((current_tile_y % 2) << 1) + (current_tile_x % 2);
+            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
             let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11; 
-            let pallette_address = pallette_table_address as u16 + (pallette_table_index as u16 * 4);
+            let pallette_address = PALLETTE_TABLE_START + (pallette_table_index as u16 * 4);
 
             // The nametable entry indexes the pattern table
             let pattern_table_index = nametable_entry as u16;
@@ -212,8 +255,11 @@ impl PPU {
             let current_pixel_color_msb = select_bit_n(pattern_byte_msb as usize, current_pixel_x as usize % 8);
             let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
 
-            let pallette_value = self.ppu_bus.read_u8(pallette_address + pixel_color as u16);
-
+            let pallette_value = if pixel_color % 4 == 0 {
+                self.ppu_bus.read_u8(pallette_address + 0)
+            } else {
+                self.ppu_bus.read_u8(pallette_address + pixel_color as u16)
+            };
 
             let actual_pixel_color = COLORS[pallette_value as usize];
 
@@ -228,6 +274,14 @@ impl PPU {
             if self.ppu_ctrl.vblank_nmi_enable() == 1 {
                 self.call_nmi();
             }
+        } else if self.current_scanline == 261 && current_pixel_x == 1 {
+            // Pre-render scanline
+            self.ppu_status.set_vblank(0);
+            self.had_pre_render_scanline = true;
+        } else if let 257..=320 = current_pixel_x {
+            // the sprite tile loading interval 
+
+            self.oam_addr = 0; 
         }
 
         self.current_cycle += 1;
@@ -238,12 +292,6 @@ impl PPU {
             if self.current_scanline > 261 {
                 self.current_scanline = 0;
                 self.informed_frame_ready = false;
-            }
-
-            if self.current_scanline == 261 {
-                // Pre-render scanline
-                self.ppu_status.set_vblank(0);
-                self.had_pre_render_scanline = true;
             }
         }
     }

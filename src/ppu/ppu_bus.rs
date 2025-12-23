@@ -33,7 +33,7 @@ impl PPUBus {
                 let nametable_addr = addr as usize & 0x0fff;
                 self.nametable_ram[nametable_addr]
             }
-            0x3f00..=0x3f1f => {
+            0x3f00..=0x3fff => {
                 let pallette_addr = addr as usize & 0x1f;
                 self.pallette_ram[pallette_addr]
             }

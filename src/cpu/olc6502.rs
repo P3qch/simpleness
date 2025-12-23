@@ -67,6 +67,11 @@ impl Olc6502 {
         }
     }
 
+    fn bus_write_u8(&mut self, addr: u16, data: u8) {
+        let extra_cycles = self.bus.write_u8(addr, data);
+        self.cycles += extra_cycles as u64;
+    }
+
     pub fn frame_ready(&mut self) -> bool { 
         self.bus.ppu.frame_ready()
 
@@ -272,7 +277,7 @@ impl Olc6502 {
     }
 
     fn push_u8(&mut self, data: u8) {
-        self.bus.write_u8(0x0100 | (self.s as u16), data);
+        self.bus_write_u8(0x0100 | (self.s as u16), data);
         self.s = self.s.wrapping_sub(1);
     }
 
@@ -336,7 +341,7 @@ impl Olc6502 {
         let mut result = self.bus.read_u8(self.operand);
         let old = result;
         result <<= 1;
-        self.bus.write_u8(self.operand, result);
+        self.bus_write_u8(self.operand, result);
 
         self.set_zn_flags(result);
         self.p.set(StatusFlags::C, old & (1 << 7) != 0);
@@ -436,7 +441,7 @@ impl Olc6502 {
     fn inst_dec(&mut self) {
         let mut memory = self.bus.read_u8(self.operand);
         memory = memory.wrapping_sub(1);
-        self.bus.write_u8(self.operand, memory);
+        self.bus_write_u8(self.operand, memory);
         self.set_zn_flags(memory);
     }
 
@@ -458,7 +463,7 @@ impl Olc6502 {
     fn inst_inc(&mut self) {
         let mut memory = self.bus.read_u8(self.operand);
         memory = memory.wrapping_add(1);
-        self.bus.write_u8(self.operand, memory);
+        self.bus_write_u8(self.operand, memory);
         self.set_zn_flags(memory);
     }
 
@@ -513,7 +518,7 @@ impl Olc6502 {
         let mut result = self.bus.read_u8(self.operand);
         let old = result;
         result >>= 1;
-        self.bus.write_u8(self.operand, result);
+        self.bus_write_u8(self.operand, result);
 
         self.set_zn_flags(result);
         self.p.set(StatusFlags::C, old & 1 != 0);
@@ -561,7 +566,7 @@ impl Olc6502 {
         let old = result;
         let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
         result = (result << 1) | carry;
-        self.bus.write_u8(self.operand, result);
+        self.bus_write_u8(self.operand, result);
 
         self.set_zn_flags(result);
         self.p.set(StatusFlags::C, old & (1 << 7) != 0);
@@ -582,7 +587,7 @@ impl Olc6502 {
         let old = result;
         let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
         result = (result >> 1) | (carry << 7);
-        self.bus.write_u8(self.operand, result);
+        self.bus_write_u8(self.operand, result);
 
         self.set_zn_flags(result);
         self.p.set(StatusFlags::C, old & 1 != 0);
@@ -628,15 +633,15 @@ impl Olc6502 {
     }
 
     fn inst_sta(&mut self) {
-        self.bus.write_u8(self.operand, self.a);
+        self.bus_write_u8(self.operand, self.a);
     }
 
     fn inst_stx(&mut self) {
-        self.bus.write_u8(self.operand, self.x);
+        self.bus_write_u8(self.operand, self.x);
     }
 
     fn inst_sty(&mut self) {
-        self.bus.write_u8(self.operand, self.y);
+        self.bus_write_u8(self.operand, self.y);
     }
 
     fn inst_tax(&mut self) {

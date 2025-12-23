@@ -1,5 +1,5 @@
 use crate::memory::mapper::SharedMapper;
-use crate::ppu::{self, PPU};
+use crate::ppu::{OAMDMA, PPU};
 
 const INTERNAL_RAM_SIZE: usize = 0x800;
 
@@ -63,7 +63,8 @@ impl Bus {
         buffer
     }
 
-    pub fn write_u8(&mut self, addr: u16, data: u8) {
+    pub fn write_u8(&mut self, addr: u16, data: u8) -> usize {
+        let mut extra_cpu_cycles = 0;
         if let None = self.mapper {
             panic!("Attempted to write to bus before loading ROM");
         }
@@ -76,10 +77,31 @@ impl Bus {
                 let ppu_register_addr = 0x2000 + (addr % 8);
                 self.ppu.write_register(ppu_register_addr, data);
             }
+
+            OAMDMA => {
+                // Perform OAM DMA transfer
+                let base_addr = (data as u16) << 8;
+                extra_cpu_cycles += 513; // 513 or 514 cycles depending on CPU cycle alignment
+                for i in 0..0x100 {
+                    let byte = self.read_u8(base_addr.wrapping_add(i));
+
+                    for _ in 0..3 {
+                        self.ppu.tick();
+                    }
+                    
+                    self.ppu.write_register(0x2004, byte); // OAMDATA register
+                    
+                    for _ in 0..3 {
+                        self.ppu.tick();
+                    }
+                }
+            }
+
             _ => {
                 let mut mapper = self.mapper.as_ref().unwrap().borrow_mut();
                 mapper.cpu_map_write(addr, data);
             }
         }
+        extra_cpu_cycles
     }
 }
