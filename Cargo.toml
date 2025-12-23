@@ -3,10 +3,13 @@ name = "simpleness"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+debug = true
+
 [dependencies]
 bitflags = "2.10.0"
 byteorder = "1.5.0"
 modular-bitfield = "0.13.1"
-pixels = "0.13"
-winit  = "0.28"
+pixels = "0.15"
+winit  = "0.30.12"
 lazy_static = "1.5.0"
