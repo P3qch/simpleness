@@ -17,6 +17,7 @@ pub struct OAMSprite {
     x: u8,
 }
 
+#[allow(dead_code)]
 impl OAMSprite {
     pub fn new(y: u8, tile_index: u8, attributes_byte: u8, x: u8) -> Self {
         Self {

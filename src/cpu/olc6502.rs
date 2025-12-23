@@ -104,11 +104,13 @@ impl Olc6502 {
             Some(op) => opcode = op,
             None => panic!("Unknown opcode: {:02X} at PC: {:04X}", current_byte, self.pc),
         }
-        let opcode_bytes = self.bus.read_buffer(self.pc, opcode.mode.size() as u16);
-        let old_pc = self.pc;
+
         self.pc += 1;
         let old_cycles = self.cycles;
         self.handle_addressing(opcode.mode, opcode.cross_cycle);
+
+        // let opcode_bytes = self.bus.read_buffer(self.pc, opcode.mode.size() as u16);
+        // let old_pc = self.pc;
         // println!(
         //     "{:04X}  {:02X} {} {}  {} {:28}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
         //     old_pc,

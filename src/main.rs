@@ -82,7 +82,7 @@ mod ppu;
 use std::{cell::RefCell, rc::Rc};
 
 use cpu::olc6502::Olc6502;
-use pixels::{Pixels, SurfaceTexture};
+use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::RequestAdapterOptions};
 use winit::{
     application::ApplicationHandler, dpi::LogicalSize, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::WindowId
 };
@@ -115,7 +115,15 @@ impl<'a> NesApp<'a> {
         self.window_id = Some(window_id);
 
         let surface_texture = SurfaceTexture::new(WIDTH * 2, HEIGHT * 2, window);
-        let pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).unwrap();
+        let pixels = PixelsBuilder::new(WIDTH, HEIGHT, surface_texture)
+            .request_adapter_options(RequestAdapterOptions {
+                power_preference: pixels::wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None
+            })
+            .enable_vsync(true)
+            .build()
+            .unwrap();
         self.pixels = Some(pixels);
     }
 

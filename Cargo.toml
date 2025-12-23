@@ -3,9 +3,6 @@ name = "simpleness"
 version = "0.1.0"
 edition = "2024"
 
-[profile.release]
-debug = true
-
 [dependencies]
 bitflags = "2.10.0"
 byteorder = "1.5.0"

@@ -21,24 +21,7 @@ pub enum AddressingMode {
 }
 
 impl AddressingMode {
-    pub fn size(&self) -> u8 {
-        match self {
-            AddressingMode::Acc => 1,
-            AddressingMode::Abs => 3,
-            AddressingMode::AbsX => 3,
-            AddressingMode::AbsY => 3,
-            AddressingMode::Imm => 2,
-            AddressingMode::Impl => 1,
-            AddressingMode::Ind => 3,
-            AddressingMode::XInd => 2,
-            AddressingMode::IndY => 2,
-            AddressingMode::Rel => 2,
-            AddressingMode::Zpg => 2,
-            AddressingMode::ZpgX => 2,
-            AddressingMode::ZpgY => 2,
-        }
-    }
-
+    #[allow(dead_code)]
     pub fn format_operand(&self, operand: u16, cpu: &mut Olc6502) -> String {
         match self {
             AddressingMode::Acc => String::from("A"),

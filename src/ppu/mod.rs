@@ -13,7 +13,7 @@ use ppu_mask::PPUMask;
 use ppu_status::PPUStatus;
 use address_register::AddressRegister;
 
-use crate::{WIDTH, memory::mapper::SharedMapper};
+use crate::memory::mapper::SharedMapper;
 
 const PPUCTRL: u16 = 0x2000;
 const PPUMASK: u16 = 0x2001;
@@ -26,7 +26,6 @@ const PPUDATA: u16 = 0x2007;
 pub const OAMDMA: u16 = 0x4014;
 
 const PALLETTE_TABLE_START: u16 = 0x3F00;
-const PALLETTE_TABLE_END: u16 = 0x3FFF;
 const ATTRIBUTE_TABLE_OFFSET: u16 = 0x03C0; 
 
 const COLORS: [(u8,u8,u8); 64] = [
@@ -108,7 +107,9 @@ impl PPU {
     }
 
     pub fn frame_ready(&mut self) -> bool {
+        // println!("{}", self.current_cycle);
         if self.ppu_status.vblank() == 1 && !self.informed_frame_ready {
+        // if self.current_cycle == 0 {
             self.informed_frame_ready = true;
             true
         }
