@@ -38,6 +38,10 @@ impl OAMSprite {
         self.y
     }
 
+    pub fn get_rendered_y(&self) -> u8 {
+        self.y + 1
+    }
+
     pub fn get_tile_index(&self) -> u8 {
         self.tile_index
     }

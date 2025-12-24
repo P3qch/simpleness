@@ -184,7 +184,7 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
 
 fn main() {
     let mut bus = memory::bus::Bus::new();
-    let rom_content = std::fs::read("roms/donkey kong.nes").unwrap();
+    let rom_content = std::fs::read("roms/Donkey Kong 3 (World).nes").unwrap();
     let mapper = memory::mapper::parse_rom(rom_content);
     bus.set_mapper(Rc::new(RefCell::new(mapper)));
 
