@@ -114,7 +114,7 @@ pub struct Ppu {
 
     screen_pixelbuffer: Vec<u8>,
     informed_frame_ready: bool, // has informed that the frame is ready to render
-    pub should_nmi: bool, // tells the cpu to nmi
+    pub should_nmi: bool,       // tells the cpu to nmi
 
     oam_data: [u8; 0x100],
     oam_addr: u8,
@@ -122,7 +122,7 @@ pub struct Ppu {
     scanline_sprites: [OAMSprite; 8],
     scanline_sprites_count: usize,
 
-    
+    opaque_bg_pixel_table: [[bool; 256]; 240],
 }
 
 impl Ppu {
@@ -148,6 +148,7 @@ impl Ppu {
             oam_addr: 0,
             scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4]); 8],
             scanline_sprites_count: 0,
+            opaque_bg_pixel_table: [[false; 256]; 240],
         }
     }
 
@@ -400,6 +401,9 @@ impl Ppu {
             current_pixel_x % 8,
         );
 
+        self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] =
+            pixel_color != 0;
+
         let pallette_value = self.get_pallette_value(pallette_address, pixel_color as u16);
 
         self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
@@ -431,8 +435,10 @@ impl Ppu {
             }
         };
 
-        let tile_index = if (current_sprite_line >= 8 && sprite.get_attributes().flip_vertical() == 0) 
-            || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1) {
+        let tile_index = if (current_sprite_line >= 8
+            && sprite.get_attributes().flip_vertical() == 0)
+            || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1)
+        {
             sprite.get_tile_index() + 1
         } else {
             sprite.get_tile_index()
@@ -444,7 +450,12 @@ impl Ppu {
         let pixel_color =
             self.get_pattern_pixel(pattern_table, tile_index, current_tile_y, current_tile_x);
 
-        if pixel_color != 0 {
+        if pixel_color != 0
+            && (sprite.get_attributes().priority() == 0
+                || (sprite.get_attributes().priority() == 1
+                    && !self.opaque_bg_pixel_table[current_pixel_y as usize]
+                        [current_pixel_x as usize]))
+        {
             let pallette_value = self.get_pallette_value(pallette_table, pixel_color as u16);
             self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
         }
@@ -454,7 +465,8 @@ impl Ppu {
         if pallette_index == 0 {
             self.ppu_bus.read_u8(PALLETTE_TABLE_START)
         } else {
-            self.ppu_bus.read_u8(pallette_table_address + pallette_index)
+            self.ppu_bus
+                .read_u8(pallette_table_address + pallette_index)
         }
     }
 
@@ -477,20 +489,24 @@ impl Ppu {
         pixel_color
     }
 
-    fn draw_pixel(&mut self, current_pixel_x: u16, current_pixel_y: u16, mut pallette_value: usize) {
+    fn draw_pixel(
+        &mut self,
+        current_pixel_x: u16,
+        current_pixel_y: u16,
+        mut pallette_value: usize,
+    ) {
         if self.ppu_mask.grayscale() == 1 {
             pallette_value &= 0x30;
         }
 
         let pixel_color = COLORS[pallette_value];
-        
+
         let current_pixel_index = current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4;
         self.screen_pixelbuffer[current_pixel_index + 0] = pixel_color.0;
         self.screen_pixelbuffer[current_pixel_index + 1] = pixel_color.1;
         self.screen_pixelbuffer[current_pixel_index + 2] = pixel_color.2;
         self.screen_pixelbuffer[current_pixel_index + 3] = 0xff;
     }
-    
 }
 
 fn select_bit_n(x: u8, n: u8) -> u8 {
