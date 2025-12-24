@@ -10,6 +10,7 @@ pub struct OAMSpriteAttributes {
     pub flip_vertical: B1,
 }
 
+#[derive(Clone, Copy)]
 pub struct OAMSprite {
     y: u8,
     tile_index: u8,

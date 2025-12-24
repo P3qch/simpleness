@@ -5,7 +5,10 @@ mod ppu_ctrl;
 mod ppu_mask;
 mod ppu_status;
 
-use std::vec;
+use std::{
+    io::{BufReader, Cursor, Read},
+    vec,
+};
 
 use address_register::AddressRegister;
 use ppu_bus::PPUBus;
@@ -13,7 +16,7 @@ use ppu_ctrl::PPUCtrl;
 use ppu_mask::PPUMask;
 use ppu_status::PPUStatus;
 
-use crate::memory::mapper::SharedMapper;
+use crate::{memory::mapper::SharedMapper, ppu::oam_sprite::OAMSprite};
 
 const PPUCTRL: u16 = 0x2000;
 const PPUMASK: u16 = 0x2001;
@@ -115,6 +118,9 @@ pub struct Ppu {
 
     oam_data: [u8; 0x100],
     oam_addr: u8,
+
+    scanline_sprites: [OAMSprite; 8],
+    scanline_sprites_count: usize,
 }
 
 impl Ppu {
@@ -138,6 +144,8 @@ impl Ppu {
             should_nmi: false,
             oam_data: [0; 0x100],
             oam_addr: 0,
+            scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4]); 8],
+            scanline_sprites_count: 0,
         }
     }
 
@@ -287,6 +295,73 @@ impl Ppu {
                     current_tile_y,
                 );
             }
+            if self.ppu_mask.show_sprites() == 1 {
+                for sprite in self.scanline_sprites[..self.scanline_sprites_count]
+                    .iter()
+                    .filter(|s| {
+                        let x = s.get_x() as u16;
+                        x <= current_pixel_x && current_pixel_x < x + 8
+                    })
+                    .rev()
+                {
+                    // reverse this to give the first sprite most priority
+                    let mut current_sprite_line = self.current_scanline as u8 - sprite.get_y();
+                    if sprite.get_attributes().flip_vertical() == 1 {
+                        current_sprite_line = self.ppu_ctrl.get_sprite_height() - current_sprite_line;
+                    }
+
+                    let mut current_sprite_x = current_pixel_x as u8 - sprite.get_x();
+                    if sprite.get_attributes().flip_horizontal() == 1 {
+                        current_sprite_x = 7 - current_sprite_x
+                    }
+
+                    let pallette_table = PALLETTE_TABLE_START
+                        + 0x10
+                        + (sprite.get_attributes().pallette() as u16 * 4);
+                    
+                    let pattern_table = if self.ppu_ctrl.get_sprite_height() == 8 {
+                        self.ppu_ctrl.get_sprite_pattern_table_address()
+                    } else { // == 16
+                        if sprite.get_tile_index() & 1 == 1 {
+                            0x1000
+                        } else {
+                            0
+                        }
+                    };
+
+                    let tile_index = if current_sprite_line >= 8 {
+                        sprite.get_tile_index() + 1
+                    } else {
+                        sprite.get_tile_index()
+                    } as u16;
+
+                    let current_tile_y = (current_sprite_line % 8) as u16;
+                    let current_tile_x = current_sprite_x as u16;
+
+                    let pattern_lsb_address = pattern_table + (tile_index * 16 + 0) + (current_tile_y % 8);
+                    let pattern_msb_address = pattern_table + (tile_index * 16 + 8) + (current_tile_y % 8);
+
+                    let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
+                    let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
+                    // println!("{current_tile_x}");
+                    let current_pixel_color_lsb =
+                        select_bit_n(pattern_byte_lsb as usize, current_tile_x as usize);
+                    let current_pixel_color_msb =
+                        select_bit_n(pattern_byte_msb as usize, current_tile_x as usize);
+                    let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
+
+                    if !pixel_color.is_multiple_of(4) {
+                        let actual_pixel_color = COLORS[self.ppu_bus.read_u8(pallette_table + pixel_color as u16) as usize];
+
+                        let current_pixel_index = current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4;
+                        self.screen_pixelbuffer[current_pixel_index + 0] = actual_pixel_color.0;
+                        self.screen_pixelbuffer[current_pixel_index + 1] = actual_pixel_color.1;
+                        self.screen_pixelbuffer[current_pixel_index + 2] = actual_pixel_color.2;
+                        self.screen_pixelbuffer[current_pixel_index + 3] = 0xff;
+                    }
+
+                }
+            }
         } else if self.current_scanline == 241 && current_pixel_x == 1 {
             // Entering VBlank
             self.ppu_status.set_vblank(1);
@@ -298,8 +373,12 @@ impl Ppu {
             // Pre-render scanline
             self.ppu_status.set_vblank(0);
             self.had_pre_render_scanline = true;
-        } else if let 257..=320 = current_pixel_x {
+        } else if 320 == current_pixel_x
+            && (self.current_scanline < 240 || self.current_scanline == 261)
+        {
+            // supposedly sprite evaluation happens in x = 257..=320 but i'm going to do it in one go because lazy
             // the sprite tile loading interval
+            self.do_sprite_evaluation();
 
             self.oam_addr = 0;
         }
@@ -316,6 +395,25 @@ impl Ppu {
         }
     }
 
+    fn do_sprite_evaluation(&mut self) {
+        self.scanline_sprites_count = 0;
+        let mut oam_reader = BufReader::new(Cursor::new(&self.oam_data));
+
+        let mut bytes = [0u8; 4];
+
+        for _ in 0..64 {
+            oam_reader.read_exact(&mut bytes).unwrap();
+            let sprite = OAMSprite::from_bytes(&bytes);
+
+            let next_scanline = ((self.current_scanline + 1) % 262) as u8; // it's aight to cast because of scanline range
+            let sprite_height = self.ppu_ctrl.get_sprite_height();
+            if sprite.get_y() <= next_scanline && next_scanline <= sprite.get_y() + sprite_height && self.scanline_sprites_count < 8 {
+                self.scanline_sprites[self.scanline_sprites_count] = sprite;
+                self.scanline_sprites_count += 1;
+            }
+        }
+    }
+
     fn render_background(
         &mut self,
         current_pixel_x: u16,
@@ -326,7 +424,7 @@ impl Ppu {
         // Visible scanlines
         let nametable_address = self.ppu_ctrl.get_base_nametable_address();
         let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
-        let pattern_table_address = self.ppu_ctrl.get_pattern_table_address();
+        let pattern_table_address = self.ppu_ctrl.get_background_pattern_table_address();
 
         // First we get the nametable entry for the current pixel
         let nametable_index = current_tile_x + current_tile_y * 32;
@@ -351,9 +449,7 @@ impl Ppu {
         let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
         let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
 
-        fn select_bit_n(x: usize, n: usize) -> usize {
-            (x >> (7 - n)) & 1
-        }
+
         let current_pixel_color_lsb =
             select_bit_n(pattern_byte_lsb as usize, current_pixel_x as usize % 8);
         let current_pixel_color_msb =
@@ -372,16 +468,14 @@ impl Ppu {
 
         let actual_pixel_color = COLORS[pallette_value as usize];
 
-        self.screen_pixelbuffer
-            [current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 0] =
-            actual_pixel_color.0;
-        self.screen_pixelbuffer
-            [current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 1] =
-            actual_pixel_color.1;
-        self.screen_pixelbuffer
-            [current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 2] =
-            actual_pixel_color.2;
-        self.screen_pixelbuffer
-            [current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4 + 3] = 0xff;
+        let current_pixel_index = current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4;
+        self.screen_pixelbuffer[current_pixel_index + 0] = actual_pixel_color.0;
+        self.screen_pixelbuffer[current_pixel_index + 1] = actual_pixel_color.1;
+        self.screen_pixelbuffer[current_pixel_index + 2] = actual_pixel_color.2;
+        self.screen_pixelbuffer[current_pixel_index + 3] = 0xff;
     }
+}
+
+fn select_bit_n(x: usize, n: usize) -> usize {
+    (x >> (7 - n)) & 1
 }

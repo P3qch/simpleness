@@ -30,11 +30,23 @@ impl PPUCtrl {
         if self.increment_mode() == 0 { 1 } else { 32 }
     }
 
-    pub fn get_pattern_table_address(&self) -> u16 {
+    pub fn get_background_pattern_table_address(&self) -> u16 {
         if self.background_pattern_table_address() == 0 {
             0x0000
         } else {
             0x1000
         }
+    }
+
+    pub fn get_sprite_pattern_table_address(&self) -> u16 {
+        if self.sprite_pattern_table_address() == 0 {
+            0x0000
+        } else {
+            0x1000
+        }
+    }
+
+    pub fn get_sprite_height(&self) -> u8 {
+        if self.sprite_size() == 1 { 16 } else { 8 }
     }
 }
