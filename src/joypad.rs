@@ -38,7 +38,7 @@ impl Joypad {
     */
     pub fn read_status(&mut self) -> u8 {
         if self.shift_register_strobe {
-                self.current_read_number = 0;
+            self.current_read_number = 0;
         }
 
         if self.current_read_number < 8 {

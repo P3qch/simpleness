@@ -43,9 +43,7 @@ impl Bus {
                 let ppu_register_addr = 0x2000 + (addr % 8);
                 self.ppu.read_register(ppu_register_addr)
             }
-            JOY1 => {
-                self.joypad1.read_status()
-            },
+            JOY1 => self.joypad1.read_status(),
             JOY2 => self.joypad2.read_status(),
             _ => mapper.cpu_map_read(addr),
         }

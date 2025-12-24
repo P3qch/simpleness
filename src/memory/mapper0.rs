@@ -11,7 +11,7 @@ impl Mapper0 {
         let should_mirror_prg_rom_page = prg_rom.len() == 0x4000;
         if prg_rom.len() != 0x4000 && prg_rom.len() != 0x8000 {
             panic!("Invalid prg rom size");
-        } 
+        }
 
         if chr_rom.len() == 0 {
             chr_rom = vec![0; 0x2000];
@@ -21,7 +21,11 @@ impl Mapper0 {
             panic!("Invalid chr rom size");
         }
 
-        Self { prg_rom, should_mirror_prg_rom_page, chr_rom }
+        Self {
+            prg_rom,
+            should_mirror_prg_rom_page,
+            chr_rom,
+        }
     }
 }
 
