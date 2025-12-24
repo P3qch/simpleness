@@ -295,7 +295,7 @@ impl Ppu {
                     current_tile_y,
                 );
             }
-            if self.ppu_mask.show_sprites() == 1 && current_pixel_y > 1 {
+            if self.ppu_mask.show_sprites() == 1 {
                 let mut sprites =
                     vec![OAMSprite::from_bytes(&[0, 0, 0, 0]); self.scanline_sprites_count];
                 self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
