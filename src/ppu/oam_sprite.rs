@@ -43,7 +43,7 @@ impl OAMSprite {
 
     pub fn get_attributes(&self) -> OAMSpriteAttributes {
         self.attributes
-    } 
+    }
 
     pub fn get_x(&self) -> u8 {
         self.x

@@ -31,16 +31,12 @@ impl Bus {
         let mapper = self.mapper.as_ref().unwrap().borrow();
 
         match addr {
-            0x0000..=0x1FFF => {
-                self.internal_ram[addr as usize & (INTERNAL_RAM_SIZE - 1)]
-            }
+            0x0000..=0x1FFF => self.internal_ram[addr as usize & (INTERNAL_RAM_SIZE - 1)],
             0x2000..=0x3FFF => {
                 let ppu_register_addr = 0x2000 + (addr % 8);
                 self.ppu.read_register(ppu_register_addr)
             }
-            _ => {
-                mapper.cpu_map_read(addr)
-            }
+            _ => mapper.cpu_map_read(addr),
         }
     }
 
@@ -88,9 +84,9 @@ impl Bus {
                     for _ in 0..3 {
                         self.ppu.tick();
                     }
-                    
+
                     self.ppu.write_register(0x2004, byte); // OAMDATA register
-                    
+
                     for _ in 0..3 {
                         self.ppu.tick();
                     }

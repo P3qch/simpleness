@@ -1,5 +1,5 @@
-use crate::memory::bus::Bus;
 use crate::cpu::instructions::{AddressingMode, Instruction, OPCODE_MAP};
+use crate::memory::bus::Bus;
 use bitflags::bitflags;
 
 const NMI_ADDRESS: u16 = 0xfffa;
@@ -72,9 +72,8 @@ impl Olc6502 {
         self.cycles += extra_cycles as u64;
     }
 
-    pub fn frame_ready(&mut self) -> bool { 
+    pub fn frame_ready(&mut self) -> bool {
         self.bus.ppu.frame_ready()
-
     }
 
     pub fn reset(&mut self) {
@@ -85,7 +84,7 @@ impl Olc6502 {
         self.s -= 3;
         self.p |= StatusFlags::I;
     }
-    
+
     pub fn nmi(&mut self) {
         self.push_u16(self.pc);
         self.push_u8(self.p.bits() | StatusFlags::I.bits()); // we gotta add this B flag here
@@ -96,13 +95,16 @@ impl Olc6502 {
 
     pub fn execute_instruction(&mut self) -> u64 {
         let current_byte = self.bus.read_u8(self.pc);
-        
+
         let opcode_option = OPCODE_MAP.get(&current_byte);
 
         let opcode;
         match opcode_option {
             Some(op) => opcode = op,
-            None => panic!("Unknown opcode: {:02X} at PC: {:04X}", current_byte, self.pc),
+            None => panic!(
+                "Unknown opcode: {:02X} at PC: {:04X}",
+                current_byte, self.pc
+            ),
         }
 
         self.pc += 1;
@@ -130,7 +132,13 @@ impl Olc6502 {
         match opcode.instr {
             Instruction::ADC => self.inst_adc(),
             Instruction::AND => self.inst_and(),
-            Instruction::ASL => if opcode.mode == AddressingMode::Acc { self.inst_asl_accumulator() } else { self.inst_asl_memory() },
+            Instruction::ASL => {
+                if opcode.mode == AddressingMode::Acc {
+                    self.inst_asl_accumulator()
+                } else {
+                    self.inst_asl_memory()
+                }
+            }
             Instruction::BCC => self.inst_bcc(),
             Instruction::BCS => self.inst_bcs(),
             Instruction::BEQ => self.inst_beq(),
@@ -160,15 +168,33 @@ impl Olc6502 {
             Instruction::LDA => self.inst_lda(),
             Instruction::LDX => self.inst_ldx(),
             Instruction::LDY => self.inst_ldy(),
-            Instruction::LSR => if opcode.mode == AddressingMode::Acc { self.inst_lsr_accumulator() } else { self.inst_lsr_memory() },
+            Instruction::LSR => {
+                if opcode.mode == AddressingMode::Acc {
+                    self.inst_lsr_accumulator()
+                } else {
+                    self.inst_lsr_memory()
+                }
+            }
             Instruction::NOP => (),
             Instruction::ORA => self.inst_ora(),
             Instruction::PHA => self.inst_pha(),
             Instruction::PHP => self.inst_php(),
             Instruction::PLA => self.inst_pla(),
             Instruction::PLP => self.inst_plp(),
-            Instruction::ROL => if opcode.mode == AddressingMode::Acc { self.inst_rol_accumulator() } else { self.inst_rol_memory() },
-            Instruction::ROR => if opcode.mode == AddressingMode::Acc { self.inst_ror_accumulator() } else { self.inst_ror_memory() },
+            Instruction::ROL => {
+                if opcode.mode == AddressingMode::Acc {
+                    self.inst_rol_accumulator()
+                } else {
+                    self.inst_rol_memory()
+                }
+            }
+            Instruction::ROR => {
+                if opcode.mode == AddressingMode::Acc {
+                    self.inst_ror_accumulator()
+                } else {
+                    self.inst_ror_memory()
+                }
+            }
             Instruction::RTI => self.inst_rti(),
             Instruction::RTS => self.inst_rts(),
             Instruction::SBC => self.inst_sbc(),
@@ -178,7 +204,7 @@ impl Olc6502 {
             Instruction::STA => self.inst_sta(),
             Instruction::STX => self.inst_stx(),
             Instruction::STY => self.inst_sty(),
-            Instruction::TAX => self.inst_tax(), 
+            Instruction::TAX => self.inst_tax(),
             Instruction::TAY => self.inst_tay(),
             Instruction::TSX => self.inst_tsx(),
             Instruction::TXA => self.inst_txa(),
@@ -233,16 +259,13 @@ impl Olc6502 {
             }
             AddressingMode::IndY => {
                 let address = self.bus.read_u8(self.pc);
-                let base = self
-                    .bus
-                    .read_u16_no_page_crossing(address as u16);
+                let base = self.bus.read_u16_no_page_crossing(address as u16);
                 self.operand = base.wrapping_add(self.y as u16);
                 self.pc += 1;
 
                 if cross_cycle && ((base & 0x00ff) + (self.y as u16) > 0x00ff) {
                     self.cycles += 1;
                 }
-
             }
             AddressingMode::Rel => {
                 self.operand = self.bus.read_u8(self.pc) as i8 as i16 as u16;
@@ -407,7 +430,7 @@ impl Olc6502 {
     fn inst_cld(&mut self) {
         self.p.remove(StatusFlags::D);
     }
-    
+
     fn inst_cli(&mut self) {
         self.p.remove(StatusFlags::I);
     }
@@ -505,7 +528,7 @@ impl Olc6502 {
         let memory = self.bus.read_u8(self.operand);
         self.y = memory;
         self.set_zn_flags(self.y);
-    }    
+    }
 
     fn inst_lsr_accumulator(&mut self) {
         let old = self.a;
@@ -555,7 +578,11 @@ impl Olc6502 {
 
     fn inst_rol_accumulator(&mut self) {
         let old = self.a;
-        let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
+        let carry = if self.p.contains(StatusFlags::C) {
+            1
+        } else {
+            0
+        };
         self.a = (self.a << 1) | carry;
         let result = self.a;
 
@@ -566,7 +593,11 @@ impl Olc6502 {
     fn inst_rol_memory(&mut self) {
         let mut result = self.bus.read_u8(self.operand);
         let old = result;
-        let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
+        let carry = if self.p.contains(StatusFlags::C) {
+            1
+        } else {
+            0
+        };
         result = (result << 1) | carry;
         self.bus_write_u8(self.operand, result);
 
@@ -576,7 +607,11 @@ impl Olc6502 {
 
     fn inst_ror_accumulator(&mut self) {
         let old = self.a;
-        let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
+        let carry = if self.p.contains(StatusFlags::C) {
+            1
+        } else {
+            0
+        };
         self.a = (self.a >> 1) | (carry << 7);
         let result = self.a;
 
@@ -587,7 +622,11 @@ impl Olc6502 {
     fn inst_ror_memory(&mut self) {
         let mut result = self.bus.read_u8(self.operand);
         let old = result;
-        let carry = if self.p.contains(StatusFlags::C) { 1 } else { 0 };
+        let carry = if self.p.contains(StatusFlags::C) {
+            1
+        } else {
+            0
+        };
         result = (result >> 1) | (carry << 7);
         self.bus_write_u8(self.operand, result);
 
@@ -602,7 +641,7 @@ impl Olc6502 {
         // was pushed to the stack.
         self.p.remove(StatusFlags::B);
         self.p.insert(StatusFlags::U);
-        self.pc = self.pop_u16();   
+        self.pc = self.pop_u16();
     }
 
     fn inst_rts(&mut self) {
@@ -616,7 +655,10 @@ impl Olc6502 {
         let result = self.a.wrapping_sub(memory).wrapping_sub(carry);
 
         self.set_zn_flags(result);
-        self.p.set(StatusFlags::V, ((self.a ^ memory) & (self.a ^ result) & 0x80) != 0);
+        self.p.set(
+            StatusFlags::V,
+            ((self.a ^ memory) & (self.a ^ result) & 0x80) != 0,
+        );
         self.p.set(StatusFlags::C, !((result as i8) < 0));
 
         self.a = result;

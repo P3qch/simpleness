@@ -1,9 +1,9 @@
-use crate::memory::mapper::SharedMapper; 
+use crate::memory::mapper::SharedMapper;
 
 pub struct PPUBus {
     mapper: Option<SharedMapper>,
-    nametable_ram: [u8; 0x1000], 
-    pallette_ram: [u8; 0x20],    
+    nametable_ram: [u8; 0x1000],
+    pallette_ram: [u8; 0x20],
 }
 
 impl PPUBus {
@@ -26,9 +26,7 @@ impl PPUBus {
         let mapper = self.mapper.as_ref().unwrap().borrow();
 
         match addr {
-            0..=0x1fff => {
-                mapper.ppu_map_read(addr)
-            }
+            0..=0x1fff => mapper.ppu_map_read(addr),
             0x2000..=0x2fff => {
                 let nametable_addr = addr as usize & 0x0fff;
                 self.nametable_ram[nametable_addr]
@@ -37,7 +35,7 @@ impl PPUBus {
                 let pallette_addr = addr as usize & 0x1f;
                 self.pallette_ram[pallette_addr]
             }
-            _ => 0
+            _ => 0,
         }
     }
 

@@ -8,4 +8,3 @@ pub struct PPUStatus {
     pub sprite_zero_hit: B1,
     pub vblank: B1,
 }
-

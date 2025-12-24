@@ -17,7 +17,7 @@ impl AddressRegister {
             *write_latch = true;
         } else {
             self.lobyte = value;
-            *write_latch = false;   
+            *write_latch = false;
         }
     }
 
@@ -25,7 +25,7 @@ impl AddressRegister {
         ((self.hibyte as u16) << 8) | (self.lobyte as u16)
     }
 
-    pub fn increment(&mut self, increment: u16){
+    pub fn increment(&mut self, increment: u16) {
         let addr = self.get_address().wrapping_add(increment);
         self.lobyte = addr as u8 & 0xff;
         self.hibyte = ((addr >> 8) & 0x3f) as u8;

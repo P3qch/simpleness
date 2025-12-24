@@ -39,7 +39,6 @@
 //         SurfaceTexture::new(WIDTH * 2, HEIGHT * 2, &window);
 //     let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).unwrap();
 
-
 //     event_loop.run(move |event, _, mut control_flow| {
 //         *control_flow = ControlFlow::Poll;
 
@@ -84,7 +83,11 @@ use std::{cell::RefCell, rc::Rc};
 use cpu::olc6502::Olc6502;
 use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::RequestAdapterOptions};
 use winit::{
-    application::ApplicationHandler, dpi::LogicalSize, event::WindowEvent, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::WindowId
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::WindowId,
 };
 
 const WIDTH: u32 = 256;
@@ -119,7 +122,7 @@ impl<'a> NesApp<'a> {
             .request_adapter_options(RequestAdapterOptions {
                 power_preference: pixels::wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
-                compatible_surface: None
+                compatible_surface: None,
             })
             .enable_vsync(true)
             .build()

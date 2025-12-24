@@ -24,7 +24,6 @@ impl Mapper0 {
             panic!("Unsupported PRG ROM size: {}", prg_rom.len());
         }
     }
-
 }
 
 impl Mapper for Mapper0 {
@@ -34,20 +33,22 @@ impl Mapper for Mapper0 {
                 let prg_rom_addr = (addr - 0x8000) as usize;
                 if prg_rom_addr < self.prg_rom.len() && !self.should_mirror_prg_rom_page {
                     self.prg_rom[prg_rom_addr]
-                } else if prg_rom_addr & 0x3fff < self.prg_rom.len() && self.should_mirror_prg_rom_page {
+                } else if prg_rom_addr & 0x3fff < self.prg_rom.len()
+                    && self.should_mirror_prg_rom_page
+                {
                     self.prg_rom[prg_rom_addr & 0x3fff]
                 } else {
                     panic!("PRG ROM read out of bounds: {:04X}", addr);
                 }
             }
-            _ => 0
+            _ => 0,
         }
     }
 
     fn cpu_map_write(&mut self, _addr: u16, _data: u8) {
         // NROM does not support writes to PRG ROM
     }
-    
+
     fn ppu_map_read(&self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x1FFF => {
@@ -58,10 +59,10 @@ impl Mapper for Mapper0 {
                     panic!("CHR ROM read out of bounds: {:04X}", addr);
                 }
             }
-            _ => 0
+            _ => 0,
         }
     }
-    
+
     fn ppu_map_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1FFF => {

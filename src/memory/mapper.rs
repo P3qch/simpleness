@@ -1,6 +1,6 @@
-use std::{cell::RefCell, io::Read, rc::Rc};
-use byteorder::ReadBytesExt;
 use crate::memory::mapper0::Mapper0;
+use byteorder::ReadBytesExt;
+use std::{cell::RefCell, io::Read, rc::Rc};
 
 pub type SharedMapper = Rc<RefCell<Box<dyn crate::memory::mapper::Mapper>>>;
 
@@ -12,9 +12,7 @@ pub trait Mapper {
 }
 
 pub fn parse_rom(rom_content: Vec<u8>) -> Box<dyn Mapper> {
-    let mut reader = std::io::BufReader::new(
-        std::io::Cursor::new(rom_content)
-    );
+    let mut reader = std::io::BufReader::new(std::io::Cursor::new(rom_content));
     let mut magic_buf = [0u8; 4];
     reader.read_exact(&mut magic_buf).unwrap();
     if &magic_buf != b"NES\x1A" {

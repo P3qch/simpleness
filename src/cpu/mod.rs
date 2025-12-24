@@ -1,2 +1,2 @@
-pub mod olc6502;
 mod instructions;
+pub mod olc6502;
