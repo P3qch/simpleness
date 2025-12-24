@@ -356,8 +356,8 @@ impl Ppu {
             oam_reader.read_exact(&mut bytes).unwrap();
             let sprite = OAMSprite::from_bytes(&bytes);
 
-            let next_scanline = ((self.current_scanline + 1) % 262) as u8; // it's aight to cast because of scanline range
-            let sprite_height = self.ppu_ctrl.get_sprite_height();
+            let next_scanline = ((self.current_scanline + 1) % 262) as u16; // it's aight to cast because of scanline range
+            let sprite_height = self.ppu_ctrl.get_sprite_height() as u16;
             if sprite.get_rendered_y() <= next_scanline
                 && next_scanline < sprite.get_rendered_y() + sprite_height
                 && self.scanline_sprites_count < 8
@@ -411,7 +411,7 @@ impl Ppu {
 
     fn render_sprite(&mut self, current_pixel_x: u16, current_pixel_y: u16, sprite: OAMSprite) {
         // reverse this to give the first sprite most priority
-        let mut current_sprite_line = self.current_scanline as u8 - sprite.get_rendered_y();
+        let mut current_sprite_line = self.current_scanline as u8 - sprite.get_rendered_y() as u8;
         if sprite.get_attributes().flip_vertical() == 1 {
             current_sprite_line = self.ppu_ctrl.get_sprite_height() - 1 - current_sprite_line;
         }
