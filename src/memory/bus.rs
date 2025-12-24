@@ -1,12 +1,12 @@
 use crate::memory::mapper::SharedMapper;
-use crate::ppu::{OAMDMA, PPU};
+use crate::ppu::{OAMDMA, Ppu};
 
 const INTERNAL_RAM_SIZE: usize = 0x800;
 
 pub struct Bus {
     internal_ram: [u8; INTERNAL_RAM_SIZE],
     mapper: Option<SharedMapper>,
-    pub ppu: PPU,
+    pub ppu: Ppu,
 }
 
 // For now we only support nrom (no mapper)
@@ -15,7 +15,7 @@ impl Bus {
         Self {
             internal_ram: [0xff; INTERNAL_RAM_SIZE],
             mapper: None,
-            ppu: PPU::new(),
+            ppu: Ppu::new(),
         }
     }
 
@@ -25,7 +25,7 @@ impl Bus {
     }
 
     pub fn read_u8(&mut self, addr: u16) -> u8 {
-        if let None = self.mapper {
+        if self.mapper.is_none() {
             panic!("Attempted to read from bus before loading ROM");
         }
         let mapper = self.mapper.as_ref().unwrap().borrow();
@@ -51,17 +51,9 @@ impl Bus {
         u16::from_le_bytes([lo, hi])
     }
 
-    pub fn read_buffer(&mut self, addr: u16, length: u16) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(length as usize);
-        for i in 0..length {
-            buffer.push(self.read_u8(addr.wrapping_add(i)));
-        }
-        buffer
-    }
-
     pub fn write_u8(&mut self, addr: u16, data: u8) -> usize {
         let mut extra_cpu_cycles = 0;
-        if let None = self.mapper {
+        if self.mapper.is_none() {
             panic!("Attempted to write to bus before loading ROM");
         }
 

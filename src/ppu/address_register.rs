@@ -27,7 +27,7 @@ impl AddressRegister {
 
     pub fn increment(&mut self, increment: u16) {
         let addr = self.get_address().wrapping_add(increment);
-        self.lobyte = addr as u8 & 0xff;
+        self.lobyte = addr as u8;
         self.hibyte = ((addr >> 8) & 0x3f) as u8;
     }
 }

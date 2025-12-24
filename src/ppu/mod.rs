@@ -95,7 +95,7 @@ const COLORS: [(u8, u8, u8); 64] = [
     (0, 0, 0),
 ];
 
-pub struct PPU {
+pub struct Ppu {
     ppu_ctrl: PPUCtrl,
     ppu_mask: PPUMask,
     ppu_status: PPUStatus,
@@ -117,15 +117,15 @@ pub struct PPU {
     oam_addr: u8,
 }
 
-impl PPU {
+impl Ppu {
     pub fn new() -> Self {
         let ppu_mask = PPUMask::from_bytes([0]);
         let ppu_ctrl = PPUCtrl::from_bytes([0]);
         let ppu_status = PPUStatus::from_bytes([0]);
         Self {
-            ppu_status: ppu_status,
-            ppu_ctrl: ppu_ctrl,
-            ppu_mask: ppu_mask,
+            ppu_status,
+            ppu_ctrl,
+            ppu_mask,
             ppu_bus: PPUBus::new(),
             ppu_addr: AddressRegister::new(),
             w: false,
@@ -344,9 +344,9 @@ impl PPU {
         // The nametable entry indexes the pattern table
         let pattern_table_index = nametable_entry as u16;
         let pattern_lsb_address =
-            pattern_table_address + (pattern_table_index * 16 + 0) + (current_pixel_y as u16 % 8);
+            pattern_table_address + (pattern_table_index * 16 + 0) + (current_pixel_y % 8);
         let pattern_msb_address =
-            pattern_table_address + (pattern_table_index * 16 + 8) + (current_pixel_y as u16 % 8);
+            pattern_table_address + (pattern_table_index * 16 + 8) + (current_pixel_y % 8);
 
         let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
         let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
@@ -360,7 +360,7 @@ impl PPU {
             select_bit_n(pattern_byte_msb as usize, current_pixel_x as usize % 8);
         let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
 
-        let mut pallette_value = if pixel_color % 4 == 0 {
+        let mut pallette_value = if pixel_color.is_multiple_of(4) {
             self.ppu_bus.read_u8(pallette_address + 0)
         } else {
             self.ppu_bus.read_u8(pallette_address + pixel_color as u16)

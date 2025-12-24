@@ -64,16 +64,8 @@ impl Mapper for Mapper0 {
     }
 
     fn ppu_map_write(&mut self, addr: u16, data: u8) {
-        match addr {
-            0x0000..=0x1FFF => {
-                let chr_rom_addr = addr as usize;
-                if chr_rom_addr < self.chr_rom.len() {
-                    self.chr_rom[chr_rom_addr] = data;
-                } else {
-                    panic!("CHR ROM write out of bounds: {:04X}", addr);
-                }
-            }
-            _ => {}
+        if let 0x0000..=0x1FFF = addr {
+            self.chr_rom[addr as usize] = data;
         }
     }
 }

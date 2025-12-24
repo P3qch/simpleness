@@ -72,10 +72,6 @@ impl Olc6502 {
         self.cycles += extra_cycles as u64;
     }
 
-    pub fn frame_ready(&mut self) -> bool {
-        self.bus.ppu.frame_ready()
-    }
-
     pub fn reset(&mut self) {
         self.pc = self.bus.read_u16(RESET_ADDRESS);
         self.a = 0;
@@ -98,14 +94,13 @@ impl Olc6502 {
 
         let opcode_option = OPCODE_MAP.get(&current_byte);
 
-        let opcode;
-        match opcode_option {
-            Some(op) => opcode = op,
+        let opcode = match opcode_option {
+            Some(op) => op,
             None => panic!(
                 "Unknown opcode: {:02X} at PC: {:04X}",
                 current_byte, self.pc
             ),
-        }
+        };
 
         self.pc += 1;
         let old_cycles = self.cycles;
@@ -659,7 +654,7 @@ impl Olc6502 {
             StatusFlags::V,
             ((self.a ^ memory) & (self.a ^ result) & 0x80) != 0,
         );
-        self.p.set(StatusFlags::C, !((result as i8) < 0));
+        self.p.set(StatusFlags::C, (result as i8) >= 0);
 
         self.a = result;
     }

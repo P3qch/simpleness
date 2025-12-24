@@ -41,6 +41,7 @@ impl AddressingMode {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Instruction {
     ADC,

@@ -20,7 +20,7 @@ impl PPUBus {
     }
 
     pub fn read_u8(&self, addr: u16) -> u8 {
-        if let None = self.mapper {
+        if self.mapper.is_none() {
             panic!("Attempted to read from PPU bus before loading ROM");
         }
         let mapper = self.mapper.as_ref().unwrap().borrow();
@@ -40,7 +40,7 @@ impl PPUBus {
     }
 
     pub fn write_u8(&mut self, addr: u16, data: u8) {
-        if let None = self.mapper {
+        if self.mapper.is_none() {
             panic!("Attempted to write to PPU bus before loading ROM");
         }
         let mut mapper = self.mapper.as_ref().unwrap().borrow_mut();
