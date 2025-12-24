@@ -384,7 +384,7 @@ impl Ppu {
         let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
         let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
         // println!("{current_tile_x}");
-        
+
         let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb, current_tile_x as u8);
         let current_pixel_color_msb = select_bit_n(pattern_byte_msb, current_tile_x as u8);
         let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);

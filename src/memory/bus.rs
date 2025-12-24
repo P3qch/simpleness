@@ -1,21 +1,28 @@
+use crate::joypad::Joypad;
 use crate::memory::mapper::SharedMapper;
 use crate::ppu::{OAMDMA, Ppu};
-
 const INTERNAL_RAM_SIZE: usize = 0x800;
 
+const JOY1: u16 = 0x4016;
+const JOY2: u16 = 0x4017;
+
 pub struct Bus {
+    pub ppu: Ppu,
+    pub joypad1: Joypad,
+    pub joypad2: Joypad,
     internal_ram: [u8; INTERNAL_RAM_SIZE],
     mapper: Option<SharedMapper>,
-    pub ppu: Ppu,
 }
 
 // For now we only support nrom (no mapper)
 impl Bus {
     pub fn new() -> Self {
         Self {
+            ppu: Ppu::new(),
+            joypad1: Joypad::new(),
+            joypad2: Joypad::new(),
             internal_ram: [0xff; INTERNAL_RAM_SIZE],
             mapper: None,
-            ppu: Ppu::new(),
         }
     }
 
@@ -36,6 +43,10 @@ impl Bus {
                 let ppu_register_addr = 0x2000 + (addr % 8);
                 self.ppu.read_register(ppu_register_addr)
             }
+            JOY1 => {
+                self.joypad1.read_status()
+            },
+            JOY2 => self.joypad2.read_status(),
             _ => mapper.cpu_map_read(addr),
         }
     }
@@ -64,6 +75,11 @@ impl Bus {
             0x2000..=0x3FFF => {
                 let ppu_register_addr = 0x2000 + (addr % 8);
                 self.ppu.write_register(ppu_register_addr, data);
+            }
+
+            JOY1 => {
+                self.joypad1.set_shift_register_strobe(data & 1 != 0);
+                self.joypad2.set_shift_register_strobe(data & 1 != 0);
             }
 
             OAMDMA => {

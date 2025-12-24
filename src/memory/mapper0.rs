@@ -7,22 +7,21 @@ pub struct Mapper0 {
 }
 
 impl Mapper0 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>) -> Self {
-        if prg_rom.len() == 0x4000 {
-            Self {
-                prg_rom,
-                should_mirror_prg_rom_page: true,
-                chr_rom,
-            }
-        } else if prg_rom.len() == 0x8000 {
-            Self {
-                prg_rom,
-                should_mirror_prg_rom_page: false,
-                chr_rom,
-            }
-        } else {
-            panic!("Unsupported PRG ROM size: {}", prg_rom.len());
+    pub fn new(prg_rom: Vec<u8>, mut chr_rom: Vec<u8>) -> Self {
+        let should_mirror_prg_rom_page = prg_rom.len() == 0x4000;
+        if prg_rom.len() != 0x4000 && prg_rom.len() != 0x8000 {
+            panic!("Invalid prg rom size");
+        } 
+
+        if chr_rom.len() == 0 {
+            chr_rom = vec![0; 0x2000];
         }
+
+        if chr_rom.len() != 0x2000 && chr_rom.len() != 0 {
+            panic!("Invalid chr rom size");
+        }
+
+        Self { prg_rom, should_mirror_prg_rom_page, chr_rom }
     }
 }
 

@@ -1,80 +1,5 @@
-// mod cpu;
-// mod memory;
-// mod ppu;
-// use std::{cell::RefCell, rc::Rc};
-
-// use cpu::olc6502::Olc6502;
-
-// use pixels::{Pixels, SurfaceTexture};
-// use winit::{
-//     dpi::LogicalSize,
-//     event::{Event, WindowEvent},
-//     event_loop::{ControlFlow, EventLoop},
-//     window::WindowBuilder,
-// };
-
-// const WIDTH: u32 = 256;
-// const HEIGHT: u32 = 240;
-
-// fn main() {
-//     let mut bus = memory::bus::Bus::new();
-
-//     let rom_content = std::fs::read("roms/donkey kong.nes").expect("Failed to read ROM file");
-//     let mapper = memory::mapper::parse_rom(rom_content);
-
-//     bus.set_mapper(Rc::new(RefCell::new(mapper)));
-
-//     let mut cpu = Olc6502::new(bus);
-
-//     cpu.reset();
-
-//        let event_loop = EventLoop::new();
-
-//     let window = WindowBuilder::new()
-//         .with_title("NES framebuffer")
-//         .with_inner_size(LogicalSize::new(WIDTH * 2, HEIGHT * 2))
-//         .build(&event_loop).unwrap();
-
-//     let surface_texture =
-//         SurfaceTexture::new(WIDTH * 2, HEIGHT * 2, &window);
-//     let mut pixels = Pixels::new(WIDTH, HEIGHT, surface_texture).unwrap();
-
-//     event_loop.run(move |event, _, mut control_flow| {
-//         *control_flow = ControlFlow::Poll;
-
-//         match event {
-//             Event::MainEventsCleared => {
-//                 while !cpu.bus.ppu.frame_ready() {
-//                     cpu.tick();
-//                 }
-//                 window.request_redraw();
-//             }
-
-//             Event::WindowEvent { event, .. } => match event {
-//                 WindowEvent::CloseRequested => {
-//                     *control_flow = ControlFlow::Exit;
-//                 }
-//                 WindowEvent::Resized(size) => {
-//                     pixels.resize_surface(size.width, size.height).unwrap();
-//                 }
-//                 _ => {}
-//             },
-
-//             Event::RedrawRequested(_) => {
-//                 let frame = pixels.frame_mut();
-
-//                 let framebuffer = cpu.bus.ppu.get_pixel_buffer();
-//                 frame.copy_from_slice(framebuffer);
-//                 if pixels.render().is_err() {
-//                     *control_flow = ControlFlow::Exit;
-//                 }
-//             }
-
-//             _ => {}
-//         }
-//     });
-// }
 mod cpu;
+mod joypad;
 mod memory;
 mod ppu;
 
@@ -85,8 +10,9 @@ use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::RequestAdapterOptions}
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{DeviceEvent, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
     window::WindowId,
 };
 
@@ -110,7 +36,7 @@ impl<'a> NesApp<'a> {
 
     fn initialize_window(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = winit::window::Window::default_attributes()
-            .with_title("NES framebuffer")
+            .with_title("Simpleness")
             .with_inner_size(LogicalSize::new(WIDTH * 2, HEIGHT * 2));
 
         let window = event_loop.create_window(attrs).unwrap();
@@ -174,6 +100,34 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
         }
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        match event {
+            DeviceEvent::Key(key_event) => {
+                if let PhysicalKey::Code(code) = key_event.physical_key {
+                    let joypad1 = &mut self.cpu.bus.joypad1;
+                    let state = if key_event.state.is_pressed() { 1 } else { 0 };
+                    match code {
+                        KeyCode::ArrowUp => joypad1.state.set_up(state),
+                        KeyCode::ArrowDown => joypad1.state.set_down(state),
+                        KeyCode::ArrowLeft => joypad1.state.set_left(state),
+                        KeyCode::ArrowRight => joypad1.state.set_right(state),
+                        KeyCode::KeyX => joypad1.state.set_a(state),
+                        KeyCode::KeyZ => joypad1.state.set_b(state),
+                        KeyCode::ShiftLeft | KeyCode::ShiftRight => joypad1.state.set_select(state),
+                        KeyCode::Enter => joypad1.state.set_start(state),
+                        _ => (),
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if self.window_id.is_some() {
             self.tick_frame();
@@ -184,7 +138,7 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
 
 fn main() {
     let mut bus = memory::bus::Bus::new();
-    let rom_content = std::fs::read("roms/Donkey Kong 3 (World).nes").unwrap();
+    let rom_content = std::fs::read("roms/sprite_ram.nes").unwrap();
     let mapper = memory::mapper::parse_rom(rom_content);
     bus.set_mapper(Rc::new(RefCell::new(mapper)));
 
