@@ -109,7 +109,7 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
                             let file = std::fs::read(path_str).unwrap();
                             let rom = Rom::parse(file);
                             self.cpu.bus.set_mapper(Rc::new(RefCell::new(rom.mapper)));
-                            self.cpu.bus.ppu.set_mirroring_mode(rom.flag6.get_nametable_mirroring_mode());
+                            self.cpu.bus.ppu.set_nametable_arrangement(rom.flag6.get_nametable_mirroring_mode());
                             self.cpu.reset();
                         }
                     }

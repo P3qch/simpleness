@@ -1,4 +1,4 @@
-use crate::{memory::mapper0::Mapper0, ppu::Mirroring};
+use crate::{memory::mapper0::Mapper0, ppu::NametableArrangement};
 use byteorder::ReadBytesExt;
 use std::{cell::RefCell, io::Read, rc::Rc};
 use modular_bitfield::prelude::*;
@@ -24,11 +24,11 @@ pub struct INesFlag6 {
 }
 
 impl INesFlag6 {
-    pub fn get_nametable_mirroring_mode(&self) -> Mirroring {
+    pub fn get_nametable_mirroring_mode(&self) -> NametableArrangement {
         if self.nametable_arrangement() == 0 {
-            Mirroring::Vertical
+            NametableArrangement::Vertical
         } else {
-            Mirroring::Horizontal
+            NametableArrangement::Horizontal
         }
     }
 }

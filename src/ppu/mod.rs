@@ -4,19 +4,19 @@ mod ppu_bus;
 mod ppu_ctrl;
 mod ppu_mask;
 mod ppu_status;
+mod ppu_registers;
 
 use std::{
     io::{BufReader, Cursor, Read},
     vec,
 };
 
-use address_register::AddressRegister;
-use ppu_bus::PPUBus;
 use ppu_ctrl::PPUCtrl;
 use ppu_mask::PPUMask;
-use ppu_status::PPUStatus;
+use ppu_registers::PpuRegisters;
+pub use ppu_bus::NametableArrangement;
 
-use crate::{memory::mapper::SharedMapper, ppu::oam_sprite::OAMSprite};
+use crate::{memory::mapper::SharedMapper, ppu::{oam_sprite::OAMSprite, ppu_bus::PPUBus}};
 
 const PPUCTRL: u16 = 0x2000;
 const PPUMASK: u16 = 0x2001;
@@ -98,25 +98,16 @@ const COLORS: [(u8, u8, u8); 64] = [
     (0, 0, 0),
 ];
 
-#[derive(Clone, Copy)]
-pub enum Mirroring {
-    Vertical,
-    Horizontal,
-}
+
 
 pub struct Ppu {
-    ppu_ctrl: PPUCtrl,
-    ppu_mask: PPUMask,
-    ppu_status: PPUStatus,
+    registers: PpuRegisters,
     ppu_bus: PPUBus,
-    ppu_addr: AddressRegister,
-    w: bool,
 
     current_scanline: i16,
     current_cycle: u64,
 
     had_pre_render_scanline: bool,
-    internal_vram_read_buffer: u8,
 
     screen_pixelbuffer: Vec<u8>,
     informed_frame_ready: bool, // has informed that the frame is ready to render
@@ -129,26 +120,16 @@ pub struct Ppu {
     scanline_sprites_count: usize,
 
     opaque_bg_pixel_table: [[bool; 256]; 240],
-
-    mirroring_mode: Mirroring
 }
 
 impl Ppu {
-    pub fn new(mirroring_mode: Mirroring) -> Self {
-        let ppu_mask = PPUMask::from_bytes([0]);
-        let ppu_ctrl = PPUCtrl::from_bytes([0]);
-        let ppu_status = PPUStatus::from_bytes([0]);
+    pub fn new(mirroring_mode: NametableArrangement) -> Self {
         Self {
-            ppu_status,
-            ppu_ctrl,
-            ppu_mask,
-            ppu_bus: PPUBus::new(),
-            ppu_addr: AddressRegister::new(),
-            w: false,
+            registers: PpuRegisters::new(),
+            ppu_bus: PPUBus::new(mirroring_mode),
             current_scanline: 0,
             current_cycle: 0,
             had_pre_render_scanline: false,
-            internal_vram_read_buffer: 0,
             screen_pixelbuffer: vec![0; 240 * 256 * 4],
             informed_frame_ready: false,
             should_nmi: false,
@@ -157,12 +138,11 @@ impl Ppu {
             scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4], false); 8],
             scanline_sprites_count: 0,
             opaque_bg_pixel_table: [[false; 256]; 240],
-            mirroring_mode,
         }
     }
 
-    pub fn set_mirroring_mode(&mut self, mode: Mirroring) {
-        self.mirroring_mode = mode;
+    pub fn set_nametable_arrangement(&mut self, mode: NametableArrangement) {
+        self.ppu_bus.set_nametable_arrangement(mode);
     }
 
     pub fn get_pixel_buffer(&self) -> &[u8] {
@@ -170,14 +150,14 @@ impl Ppu {
     }
 
     fn call_nmi(&mut self) {
-        if self.ppu_ctrl.vblank_nmi_enable() == 1 {
+        if self.registers.ppu_ctrl.vblank_nmi_enable() == 1 {
             self.should_nmi = true;
         }
     }
 
     pub fn frame_ready(&mut self) -> bool {
         // println!("{}", self.current_cycle);
-        if self.ppu_status.vblank() == 1 && !self.informed_frame_ready {
+        if self.registers.ppu_status.vblank() == 1 && !self.informed_frame_ready {
             // if self.current_cycle == 0 {
             self.informed_frame_ready = true;
             true
@@ -193,10 +173,10 @@ impl Ppu {
     pub fn read_register(&mut self, addr: u16) -> u8 {
         match addr {
             PPUSTATUS => {
-                self.w = false; // a side effect of reading PPUSTATUS is that the write toggle is cleared
-                let result = self.ppu_status.into_bytes()[0];
+                self.registers.w = false; // a side effect of reading PPUSTATUS is that the write toggle is cleared
+                let result = self.registers.ppu_status.into_bytes()[0];
 
-                self.ppu_status.set_vblank(0); // Reading PPUSTATUS clears the vblank flag
+                self.registers.ppu_status.set_vblank(0); // Reading PPUSTATUS clears the vblank flag
 
                 result
             }
@@ -214,13 +194,13 @@ impl Ppu {
 
                 Note that the read buffer is updated only on PPUDATA reads. It is not affected by writes or other PPU processes such as rendering, and it maintains its value indefinitely until the next read.
                 */
-                let addr = self.ppu_addr.get_address();
+                let addr = self.registers.ppu_addr.get_address();
                 let data = self.ppu_bus.read_u8(addr);
-                let old_internal_buffer = self.internal_vram_read_buffer;
-                self.internal_vram_read_buffer = data;
+                let old_internal_buffer = self.registers.v;
+                self.registers.v = data;
 
-                let increment = self.ppu_ctrl.get_increment_value();
-                self.ppu_addr.increment(increment);
+                let increment = self.registers.ppu_ctrl.get_increment_value();
+                self.registers.ppu_addr.increment(increment);
 
                 match addr {
                     0x3f00..=0x3fff => data, // Palette reads do not use the buffer
@@ -236,11 +216,11 @@ impl Ppu {
         match addr {
             PPUCTRL => {
                 if self.had_pre_render_scanline {
-                    let old_val = self.ppu_ctrl;
-                    self.ppu_ctrl = PPUCtrl::from_bytes([value]);
+                    let old_val = self.registers.ppu_ctrl;
+                    self.registers.ppu_ctrl = PPUCtrl::from_bytes([value]);
                     if old_val.vblank_nmi_enable() == 0
-                        && self.ppu_ctrl.vblank_nmi_enable() == 1
-                        && self.ppu_status.vblank() == 1
+                        && self.registers.ppu_ctrl.vblank_nmi_enable() == 1
+                        && self.registers.ppu_status.vblank() == 1
                     {
                         self.call_nmi();
                     }
@@ -249,7 +229,7 @@ impl Ppu {
 
             PPUMASK => {
                 if self.had_pre_render_scanline {
-                    self.ppu_mask = PPUMask::from_bytes([value]);
+                    self.registers.ppu_mask = PPUMask::from_bytes([value]);
                 }
             }
 
@@ -274,15 +254,15 @@ impl Ppu {
             }
 
             PPUADDR => {
-                self.ppu_addr.update(value, &mut self.w);
+                self.registers.ppu_addr.update(value, &mut self.registers.w);
             }
 
             PPUDATA => {
-                let addr = self.ppu_addr.get_address();
+                let addr = self.registers.ppu_addr.get_address();
                 self.ppu_bus.write_u8(addr, value);
 
-                let increment = self.ppu_ctrl.get_increment_value();
-                self.ppu_addr.increment(increment);
+                let increment = self.registers.ppu_ctrl.get_increment_value();
+                self.registers.ppu_addr.increment(increment);
             }
 
             _ => {}
@@ -301,7 +281,7 @@ impl Ppu {
         let current_tile_y = current_pixel_y / 8; // value between 0 and 30
 
         if current_pixel_y < 240 && current_pixel_x < 256 {
-            if self.ppu_mask.show_background() == 1 {
+            if self.registers.ppu_mask.show_background() == 1 {
                 self.render_background(
                     current_pixel_x,
                     current_pixel_y,
@@ -309,7 +289,7 @@ impl Ppu {
                     current_tile_y,
                 );
             }
-            if self.ppu_mask.show_sprites() == 1 {
+            if self.registers.ppu_mask.show_sprites() == 1 {
                 let mut sprites =
                     vec![OAMSprite::from_bytes(&[0, 0, 0, 0], false); self.scanline_sprites_count];
                 self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
@@ -326,15 +306,15 @@ impl Ppu {
             }
         } else if self.current_scanline == 241 && current_pixel_x == 1 {
             // Entering VBlank
-            self.ppu_status.set_vblank(1);
+            self.registers.ppu_status.set_vblank(1);
 
-            if self.ppu_ctrl.vblank_nmi_enable() == 1 {
+            if self.registers.ppu_ctrl.vblank_nmi_enable() == 1 {
                 self.call_nmi();
             }
         } else if self.current_scanline == 261 && current_pixel_x == 1 {
             // Pre-render scanline
-            self.ppu_status.set_vblank(0);
-            self.ppu_status.set_sprite_zero_hit(0);
+            self.registers.ppu_status.set_vblank(0);
+            self.registers.ppu_status.set_sprite_zero_hit(0);
             self.had_pre_render_scanline = true;
         } else if 320 == current_pixel_x
             && (self.current_scanline < 240 || self.current_scanline == 261)
@@ -369,7 +349,7 @@ impl Ppu {
             let sprite = OAMSprite::from_bytes(&bytes, i == 0);
 
             let next_scanline = ((self.current_scanline + 1) % 262) as u16; // it's aight to cast because of scanline range
-            let sprite_height = self.ppu_ctrl.get_sprite_height() as u16;
+            let sprite_height = self.registers.ppu_ctrl.get_sprite_height() as u16;
             if sprite.get_rendered_y() <= next_scanline
                 && next_scanline < sprite.get_rendered_y() + sprite_height
                 && self.scanline_sprites_count < 8
@@ -389,9 +369,9 @@ impl Ppu {
         current_tile_y: u16,
     ) {
         // Visible scanlines
-        let nametable_address = self.ppu_ctrl.get_base_nametable_address();
+        let nametable_address = self.registers.ppu_ctrl.get_base_nametable_address();
         let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
-        let pattern_table_address = self.ppu_ctrl.get_background_pattern_table_address();
+        let pattern_table_address = self.registers.ppu_ctrl.get_background_pattern_table_address();
 
         // First we get the nametable entry for the current pixel
         let nametable_index = current_tile_x + current_tile_y * 32;
@@ -425,7 +405,7 @@ impl Ppu {
         // reverse this to give the first sprite most priority
         let mut current_sprite_line = self.current_scanline as u8 - sprite.get_rendered_y() as u8;
         if sprite.get_attributes().flip_vertical() == 1 {
-            current_sprite_line = self.ppu_ctrl.get_sprite_height() - 1 - current_sprite_line;
+            current_sprite_line = self.registers.ppu_ctrl.get_sprite_height() - 1 - current_sprite_line;
         }
 
         let mut current_sprite_x = current_pixel_x as u8 - sprite.get_x();
@@ -436,8 +416,8 @@ impl Ppu {
         let pallette_table =
             PALLETTE_TABLE_START + 0x10 + (sprite.get_attributes().pallette() as u16 * 4);
 
-        let pattern_table = if self.ppu_ctrl.get_sprite_height() == 8 {
-            self.ppu_ctrl.get_sprite_pattern_table_address()
+        let pattern_table = if self.registers.ppu_ctrl.get_sprite_height() == 8 {
+            self.registers.ppu_ctrl.get_sprite_pattern_table_address()
         } else {
             // == 16
             if sprite.get_tile_index() & 1 == 1 {
@@ -448,7 +428,7 @@ impl Ppu {
         };
 
         // let tile_index = sprite.get_tile_index() as u16;
-        let tile_index = if self.ppu_ctrl.get_sprite_height() == 16
+        let tile_index = if self.registers.ppu_ctrl.get_sprite_height() == 16
             && ((current_sprite_line >= 8 && sprite.get_attributes().flip_vertical() == 0)
                 || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1))
         {
@@ -464,7 +444,7 @@ impl Ppu {
             self.get_pattern_pixel(pattern_table, tile_index, current_tile_y, current_tile_x);
 
         if sprite.is_sprite_0() && self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] {
-            self.ppu_status.set_sprite_zero_hit(1);
+            self.registers.ppu_status.set_sprite_zero_hit(1);
         }
 
         if pixel_color != 0
@@ -512,7 +492,7 @@ impl Ppu {
         current_pixel_y: u16,
         mut color: usize,
     ) {
-        if self.ppu_mask.grayscale() == 1 {
+        if self.registers.ppu_mask.grayscale() == 1 {
             color &= 0x30;
         }
 
