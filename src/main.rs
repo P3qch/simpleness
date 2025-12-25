@@ -3,10 +3,16 @@ mod joypad;
 mod memory;
 mod ppu;
 
-use std::{cell::{Ref, RefCell}, io::Read, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+};
 
 use cpu::olc6502::Olc6502;
-use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::{Color, RequestAdapterOptions}};
+use pixels::{
+    Pixels, PixelsBuilder, SurfaceTexture,
+    wgpu::RequestAdapterOptions,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -16,7 +22,7 @@ use winit::{
     window::WindowId,
 };
 
-use crate::memory::mapper::parse_rom;
+use crate::memory::mapper::Rom;
 
 const WIDTH: u32 = 256;
 const HEIGHT: u32 = 240;
@@ -59,7 +65,6 @@ impl<'a> NesApp<'a> {
     }
 
     fn tick_frame(&mut self) {
-
         while !self.cpu.bus.ppu.frame_ready() {
             self.cpu.tick();
         }
@@ -97,13 +102,14 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
                     if let Some(p) = &mut self.pixels {
                         p.resize_surface(size.width, size.height).unwrap();
                     }
-                },
+                }
                 WindowEvent::DroppedFile(path) => {
                     if path.is_file() {
                         if let Some(path_str) = path.to_str() {
                             let file = std::fs::read(path_str).unwrap();
-                            let mapper = parse_rom(file);
-                            self.cpu.bus.set_mapper(Rc::new(RefCell::new(mapper)));
+                            let rom = Rom::parse(file);
+                            self.cpu.bus.set_mapper(Rc::new(RefCell::new(rom.mapper)));
+                            self.cpu.bus.ppu.set_mirroring_mode(rom.flag6.get_nametable_mirroring_mode());
                             self.cpu.reset();
                         }
                     }
@@ -150,10 +156,9 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
 }
 
 fn main() {
-    let mut bus = memory::bus::Bus::new();
+    let bus = memory::bus::Bus::new();
 
-
-    let mut cpu = Olc6502::new(bus);
+    let cpu = Olc6502::new(bus);
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);

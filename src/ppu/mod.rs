@@ -98,6 +98,12 @@ const COLORS: [(u8, u8, u8); 64] = [
     (0, 0, 0),
 ];
 
+#[derive(Clone, Copy)]
+pub enum Mirroring {
+    Vertical,
+    Horizontal,
+}
+
 pub struct Ppu {
     ppu_ctrl: PPUCtrl,
     ppu_mask: PPUMask,
@@ -123,10 +129,12 @@ pub struct Ppu {
     scanline_sprites_count: usize,
 
     opaque_bg_pixel_table: [[bool; 256]; 240],
+
+    mirroring_mode: Mirroring
 }
 
 impl Ppu {
-    pub fn new() -> Self {
+    pub fn new(mirroring_mode: Mirroring) -> Self {
         let ppu_mask = PPUMask::from_bytes([0]);
         let ppu_ctrl = PPUCtrl::from_bytes([0]);
         let ppu_status = PPUStatus::from_bytes([0]);
@@ -146,10 +154,15 @@ impl Ppu {
             should_nmi: false,
             oam_data: [0; 0x100],
             oam_addr: 0,
-            scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4]); 8],
+            scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4], false); 8],
             scanline_sprites_count: 0,
             opaque_bg_pixel_table: [[false; 256]; 240],
+            mirroring_mode,
         }
+    }
+
+    pub fn set_mirroring_mode(&mut self, mode: Mirroring) {
+        self.mirroring_mode = mode;
     }
 
     pub fn get_pixel_buffer(&self) -> &[u8] {
@@ -298,7 +311,7 @@ impl Ppu {
             }
             if self.ppu_mask.show_sprites() == 1 {
                 let mut sprites =
-                    vec![OAMSprite::from_bytes(&[0, 0, 0, 0]); self.scanline_sprites_count];
+                    vec![OAMSprite::from_bytes(&[0, 0, 0, 0], false); self.scanline_sprites_count];
                 self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
                 for sprite in sprites
                     .iter()
@@ -321,6 +334,7 @@ impl Ppu {
         } else if self.current_scanline == 261 && current_pixel_x == 1 {
             // Pre-render scanline
             self.ppu_status.set_vblank(0);
+            self.ppu_status.set_sprite_zero_hit(0);
             self.had_pre_render_scanline = true;
         } else if 320 == current_pixel_x
             && (self.current_scanline < 240 || self.current_scanline == 261)
@@ -350,9 +364,9 @@ impl Ppu {
 
         let mut bytes = [0u8; 4];
 
-        for _ in 0..64 {
+        for i in 0..64 {
             oam_reader.read_exact(&mut bytes).unwrap();
-            let sprite = OAMSprite::from_bytes(&bytes);
+            let sprite = OAMSprite::from_bytes(&bytes, i == 0);
 
             let next_scanline = ((self.current_scanline + 1) % 262) as u16; // it's aight to cast because of scanline range
             let sprite_height = self.ppu_ctrl.get_sprite_height() as u16;
@@ -449,6 +463,10 @@ impl Ppu {
         let pixel_color =
             self.get_pattern_pixel(pattern_table, tile_index, current_tile_y, current_tile_x);
 
+        if sprite.is_sprite_0() && self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] {
+            self.ppu_status.set_sprite_zero_hit(1);
+        }
+
         if pixel_color != 0
             && (sprite.get_attributes().priority() == 0
                 || (sprite.get_attributes().priority() == 1
@@ -492,13 +510,13 @@ impl Ppu {
         &mut self,
         current_pixel_x: u16,
         current_pixel_y: u16,
-        mut pallette_value: usize,
+        mut color: usize,
     ) {
         if self.ppu_mask.grayscale() == 1 {
-            pallette_value &= 0x30;
+            color &= 0x30;
         }
 
-        let pixel_color = COLORS[pallette_value];
+        let pixel_color = COLORS[color];
 
         let current_pixel_index = current_pixel_y as usize * 256 * 4 + current_pixel_x as usize * 4;
         self.screen_pixelbuffer[current_pixel_index + 0] = pixel_color.0;

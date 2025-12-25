@@ -18,7 +18,7 @@ pub struct Bus {
 impl Bus {
     pub fn new() -> Self {
         Self {
-            ppu: Ppu::new(),
+            ppu: Ppu::new(crate::ppu::Mirroring::Vertical),
             joypad1: Joypad::new(),
             joypad2: Joypad::new(),
             internal_ram: [0xff; INTERNAL_RAM_SIZE],

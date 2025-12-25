@@ -57,7 +57,7 @@ impl Olc6502 {
         let cpu_cycles_ran = self.execute_instruction();
         for _ in 0..cpu_cycles_ran * 3 {
             self.bus.ppu.tick();
-            
+
             if self.bus.ppu.should_nmi {
                 self.bus.ppu.should_nmi = false;
                 self.nmi();
@@ -66,7 +66,6 @@ impl Olc6502 {
                 }
             }
         }
-
     }
 
     fn bus_write_u8(&mut self, addr: u16, data: u8) {

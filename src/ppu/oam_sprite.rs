@@ -16,22 +16,29 @@ pub struct OAMSprite {
     tile_index: u8,
     attributes: OAMSpriteAttributes,
     x: u8,
+
+    is_sprite_0: bool,
 }
 
 #[allow(dead_code)]
 impl OAMSprite {
-    pub fn new(y: u8, tile_index: u8, attributes_byte: u8, x: u8) -> Self {
+    pub fn new(y: u8, tile_index: u8, attributes_byte: u8, x: u8, is_sprite_0: bool) -> Self {
         Self {
             y,
             tile_index,
             attributes: OAMSpriteAttributes::from_bytes([attributes_byte]),
             x,
+            is_sprite_0,
         }
     }
 
-    pub fn from_bytes(data: &[u8]) -> Self {
+    pub fn from_bytes(data: &[u8], is_sprite_0: bool) -> Self {
         assert!(data.len() == 4, "OAMSprite data must be exactly 4 bytes");
-        Self::new(data[0], data[1], data[2], data[3])
+        Self::new(data[0], data[1], data[2], data[3], is_sprite_0)
+    }
+
+    pub fn is_sprite_0(&self) -> bool {
+        self.is_sprite_0
     }
 
     pub fn get_y(&self) -> u8 {

@@ -34,10 +34,14 @@ impl PPUBus {
             0x3f00..=0x3fff => {
                 let mut pallette_addr = addr as usize & 0x1f;
 
-                if pallette_addr == 0x10 || pallette_addr == 0x14 || pallette_addr == 0x18 || pallette_addr == 0x1C {
+                if pallette_addr == 0x10
+                    || pallette_addr == 0x14
+                    || pallette_addr == 0x18
+                    || pallette_addr == 0x1C
+                {
                     pallette_addr -= 0x10;
                 }
-                
+
                 self.pallette_ram[pallette_addr]
             }
             _ => 0,
@@ -61,12 +65,15 @@ impl PPUBus {
             0x3f00..=0x3fff => {
                 let mut pallette_addr = addr as usize & 0x1f;
 
-                if pallette_addr == 0x10 || pallette_addr == 0x14 || pallette_addr == 0x18 || pallette_addr == 0x1C {
+                if pallette_addr == 0x10
+                    || pallette_addr == 0x14
+                    || pallette_addr == 0x18
+                    || pallette_addr == 0x1C
+                {
                     pallette_addr -= 0x10;
                 }
 
                 self.pallette_ram[pallette_addr] = data;
-
             }
             _ => {}
         }
