@@ -31,6 +31,10 @@ impl Bus {
         self.ppu.set_mapper(self.mapper.as_ref().unwrap().clone());
     }
 
+    pub fn mapper_inserted(&self) -> bool {
+        self.mapper.is_some()
+    }
+
     pub fn read_u8(&mut self, addr: u16) -> u8 {
         if self.mapper.is_none() {
             panic!("Attempted to read from bus before loading ROM");

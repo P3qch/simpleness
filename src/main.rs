@@ -3,10 +3,10 @@ mod joypad;
 mod memory;
 mod ppu;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::{Ref, RefCell}, io::Read, rc::Rc};
 
 use cpu::olc6502::Olc6502;
-use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::RequestAdapterOptions};
+use pixels::{Pixels, PixelsBuilder, SurfaceTexture, wgpu::{Color, RequestAdapterOptions}};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -15,6 +15,8 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::WindowId,
 };
+
+use crate::memory::mapper::parse_rom;
 
 const WIDTH: u32 = 256;
 const HEIGHT: u32 = 240;
@@ -57,6 +59,7 @@ impl<'a> NesApp<'a> {
     }
 
     fn tick_frame(&mut self) {
+
         while !self.cpu.bus.ppu.frame_ready() {
             self.cpu.tick();
         }
@@ -94,6 +97,16 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
                     if let Some(p) = &mut self.pixels {
                         p.resize_surface(size.width, size.height).unwrap();
                     }
+                },
+                WindowEvent::DroppedFile(path) => {
+                    if path.is_file() {
+                        if let Some(path_str) = path.to_str() {
+                            let file = std::fs::read(path_str).unwrap();
+                            let mapper = parse_rom(file);
+                            self.cpu.bus.set_mapper(Rc::new(RefCell::new(mapper)));
+                            self.cpu.reset();
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -129,7 +142,7 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.window_id.is_some() {
+        if self.window_id.is_some() && self.cpu.bus.mapper_inserted() {
             self.tick_frame();
             self.redraw();
         }
@@ -138,12 +151,9 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
 
 fn main() {
     let mut bus = memory::bus::Bus::new();
-    let rom_content = std::fs::read(r"roms\donkey kong.nes").unwrap();
-    let mapper = memory::mapper::parse_rom(rom_content);
-    bus.set_mapper(Rc::new(RefCell::new(mapper)));
+
 
     let mut cpu = Olc6502::new(bus);
-    cpu.reset();
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);

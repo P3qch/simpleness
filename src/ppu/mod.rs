@@ -223,16 +223,14 @@ impl Ppu {
         match addr {
             PPUCTRL => {
                 if self.had_pre_render_scanline {
-                    let new_val = PPUCtrl::from_bytes([value]);
-
-                    if self.ppu_ctrl.vblank_nmi_enable() == 0
-                        && new_val.vblank_nmi_enable() == 1
+                    let old_val = self.ppu_ctrl;
+                    self.ppu_ctrl = PPUCtrl::from_bytes([value]);
+                    if old_val.vblank_nmi_enable() == 0
+                        && self.ppu_ctrl.vblank_nmi_enable() == 1
                         && self.ppu_status.vblank() == 1
                     {
                         self.call_nmi();
                     }
-
-                    self.ppu_ctrl = new_val;
                 }
             }
 
@@ -435,9 +433,10 @@ impl Ppu {
             }
         };
 
-        let tile_index = if (current_sprite_line >= 8
-            && sprite.get_attributes().flip_vertical() == 0)
-            || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1)
+        // let tile_index = sprite.get_tile_index() as u16;
+        let tile_index = if self.ppu_ctrl.get_sprite_height() == 16
+            && ((current_sprite_line >= 8 && sprite.get_attributes().flip_vertical() == 0)
+                || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1))
         {
             sprite.get_tile_index() + 1
         } else {
