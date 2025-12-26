@@ -14,11 +14,10 @@ impl AddressRegister {
     pub fn update(&mut self, value: u8, write_latch: &mut bool) {
         if !*write_latch {
             self.hibyte = value & 0x3f;
-            *write_latch = true;
         } else {
             self.lobyte = value;
-            *write_latch = false;
         }
+        *write_latch = !*write_latch;
     }
 
     pub fn get_address(&self) -> u16 {

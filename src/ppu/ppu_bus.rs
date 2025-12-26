@@ -30,7 +30,10 @@ impl PPUBus {
     pub fn set_nametable_arrangement(&mut self, mode: NametableArrangement) {
         self.nametable_arrangement = mode;
     }
-
+    
+    pub fn get_nametable_arrangement(&self) -> NametableArrangement {
+        self.nametable_arrangement
+    }
     pub fn read_u8(&self, addr: u16) -> u8 {
         if self.mapper.is_none() {
             panic!("Attempted to read from PPU bus before loading ROM");
@@ -93,7 +96,6 @@ impl PPUBus {
             }
             0x3f00..=0x3fff => {
                 let mut pallette_addr = addr as usize & 0x1f;
-
                 if pallette_addr == 0x10
                     || pallette_addr == 0x14
                     || pallette_addr == 0x18

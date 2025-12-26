@@ -3,20 +3,22 @@ mod oam_sprite;
 mod ppu_bus;
 mod ppu_ctrl;
 mod ppu_mask;
-mod ppu_status;
 mod ppu_registers;
+mod ppu_status;
 
 use std::{
-    io::{BufReader, Cursor, Read},
-    vec,
+    collections::VecDeque, io::{BufReader, Cursor, Read}, os::raw, vec
 };
 
+pub use ppu_bus::NametableArrangement;
 use ppu_ctrl::PPUCtrl;
 use ppu_mask::PPUMask;
 use ppu_registers::PpuRegisters;
-pub use ppu_bus::NametableArrangement;
 
-use crate::{memory::mapper::SharedMapper, ppu::{oam_sprite::OAMSprite, ppu_bus::PPUBus}};
+use crate::{
+    memory::mapper::SharedMapper,
+    ppu::{oam_sprite::OAMSprite, ppu_bus::PPUBus, ppu_registers::ScrollRegister},
+};
 
 const PPUCTRL: u16 = 0x2000;
 const PPUMASK: u16 = 0x2001;
@@ -98,11 +100,19 @@ const COLORS: [(u8, u8, u8); 64] = [
     (0, 0, 0),
 ];
 
-
+#[derive(Default, Clone, Copy)]
+struct ScrollState {
+    pub coarse_x: u8,
+    pub coarse_y: u8,
+    pub fine_x: u8,
+    pub fine_y: u8,
+}
 
 pub struct Ppu {
     registers: PpuRegisters,
     ppu_bus: PPUBus,
+
+    read_buffer: u8,
 
     current_scanline: i16,
     current_cycle: u64,
@@ -120,6 +130,8 @@ pub struct Ppu {
     scanline_sprites_count: usize,
 
     opaque_bg_pixel_table: [[bool; 256]; 240],
+
+    next_pixels: VecDeque<u8>,
 }
 
 impl Ppu {
@@ -127,6 +139,7 @@ impl Ppu {
         Self {
             registers: PpuRegisters::new(),
             ppu_bus: PPUBus::new(mirroring_mode),
+            read_buffer: 0,
             current_scanline: 0,
             current_cycle: 0,
             had_pre_render_scanline: false,
@@ -138,6 +151,7 @@ impl Ppu {
             scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4], false); 8],
             scanline_sprites_count: 0,
             opaque_bg_pixel_table: [[false; 256]; 240],
+            next_pixels: VecDeque::from([0; 0x10]), // pixels are emitted before.
         }
     }
 
@@ -156,9 +170,7 @@ impl Ppu {
     }
 
     pub fn frame_ready(&mut self) -> bool {
-        // println!("{}", self.current_cycle);
         if self.registers.ppu_status.vblank() == 1 && !self.informed_frame_ready {
-            // if self.current_cycle == 0 {
             self.informed_frame_ready = true;
             true
         } else {
@@ -194,17 +206,19 @@ impl Ppu {
 
                 Note that the read buffer is updated only on PPUDATA reads. It is not affected by writes or other PPU processes such as rendering, and it maintains its value indefinitely until the next read.
                 */
-                let addr = self.registers.ppu_addr.get_address();
+                let addr = self.registers.v;
                 let data = self.ppu_bus.read_u8(addr);
-                let old_internal_buffer = self.registers.v;
-                self.registers.v = data;
 
                 let increment = self.registers.ppu_ctrl.get_increment_value();
-                self.registers.ppu_addr.increment(increment);
+                self.registers.v += increment;
 
                 match addr {
                     0x3f00..=0x3fff => data, // Palette reads do not use the buffer
-                    _ => old_internal_buffer,
+                    _ => {
+                        let ret = self.read_buffer;
+                        self.read_buffer = data;
+                        ret
+                    }
                 }
             }
 
@@ -213,9 +227,13 @@ impl Ppu {
     }
 
     pub fn write_register(&mut self, addr: u16, value: u8) {
+        let mut new_t = ScrollRegister::from(self.registers.t);
         match addr {
             PPUCTRL => {
                 if self.had_pre_render_scanline {
+                    new_t.set_nametable_select(value & 0b11);
+                    self.registers.t = new_t.into();
+
                     let old_val = self.registers.ppu_ctrl;
                     self.registers.ppu_ctrl = PPUCtrl::from_bytes([value]);
                     if old_val.vblank_nmi_enable() == 0
@@ -250,19 +268,36 @@ impl Ppu {
             }
 
             PPUSCROLL => {
-                // TODO: Not implemented yet
+                if !self.is_rendering() {
+                    if !self.registers.w {
+                        new_t.set_coarse_x((value >> 3) & 0b11111);
+                        self.registers.x = value & 0b111;
+                    } else {
+                        new_t.set_coarse_y((value >> 3) & 0b11111);
+                        new_t.set_fine_y(value & 0b111);
+                    }
+
+                    self.registers.w = !self.registers.w;
+                    self.registers.t = new_t.into();
+                }
             }
 
             PPUADDR => {
-                self.registers.ppu_addr.update(value, &mut self.registers.w);
+                if !self.registers.w {
+                    self.registers.t = (self.registers.t & 0xff) | ((value as u16 & 0x3f) << 8);
+                } else {
+                    self.registers.t = (self.registers.t & 0xff00) | value as u16 & 0xff;
+                    self.registers.v = self.registers.t;
+                }
+                self.registers.w = !self.registers.w;
             }
 
             PPUDATA => {
-                let addr = self.registers.ppu_addr.get_address();
+                let addr = self.registers.v;
                 self.ppu_bus.write_u8(addr, value);
 
                 let increment = self.registers.ppu_ctrl.get_increment_value();
-                self.registers.ppu_addr.increment(increment);
+                self.registers.v += increment;
             }
 
             _ => {}
@@ -270,39 +305,23 @@ impl Ppu {
     }
 
     fn is_rendering(&self) -> bool {
-        self.current_scanline >= 0 && self.current_scanline < 240
+        self.current_scanline >= 0
+            && self.current_scanline < 240
+            && (self.registers.ppu_mask.show_background() == 1
+                || self.registers.ppu_mask.show_sprites() == 1)
+            && self.registers.ppu_status.vblank() == 0
     }
 
     pub fn tick(&mut self) {
         let current_pixel_x = (self.current_cycle % 341) as u16;
         let current_pixel_y = self.current_scanline as u16;
 
-        let current_tile_x = current_pixel_x / 8; // value between 0 and 32
-        let current_tile_y = current_pixel_y / 8; // value between 0 and 30
-
         if current_pixel_y < 240 && current_pixel_x < 256 {
             if self.registers.ppu_mask.show_background() == 1 {
-                self.render_background(
-                    current_pixel_x,
-                    current_pixel_y,
-                    current_tile_x,
-                    current_tile_y,
-                );
+                self._old_render_background(current_pixel_x, current_pixel_y);
             }
             if self.registers.ppu_mask.show_sprites() == 1 {
-                let mut sprites =
-                    vec![OAMSprite::from_bytes(&[0, 0, 0, 0], false); self.scanline_sprites_count];
-                self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
-                for sprite in sprites
-                    .iter()
-                    .filter(|s| {
-                        let x = s.get_x() as u16;
-                        x <= current_pixel_x && current_pixel_x < x + 8
-                    })
-                    .rev()
-                {
-                    self.render_sprite(current_pixel_x, current_pixel_y, *sprite);
-                }
+                self.render_sprites(current_pixel_x, current_pixel_y);
             }
         } else if self.current_scanline == 241 && current_pixel_x == 1 {
             // Entering VBlank
@@ -311,11 +330,17 @@ impl Ppu {
             if self.registers.ppu_ctrl.vblank_nmi_enable() == 1 {
                 self.call_nmi();
             }
-        } else if self.current_scanline == 261 && current_pixel_x == 1 {
+        } else if self.current_scanline == 261 {
             // Pre-render scanline
-            self.registers.ppu_status.set_vblank(0);
-            self.registers.ppu_status.set_sprite_zero_hit(0);
-            self.had_pre_render_scanline = true;
+            if current_pixel_x == 1 {
+                self.registers.ppu_status.set_vblank(0);
+                self.registers.ppu_status.set_sprite_zero_hit(0);
+                self.had_pre_render_scanline = true;
+            }
+            if let 280..304 = current_pixel_x {
+                self.registers.v &= !0b1111011_11100000;
+                self.registers.v |= self.registers.t & 0b1111011_11100000
+            }
         } else if 320 == current_pixel_x
             && (self.current_scanline < 240 || self.current_scanline == 261)
         {
@@ -324,6 +349,55 @@ impl Ppu {
             self.do_sprite_evaluation();
 
             self.oam_addr = 0;
+        }
+
+        if self.registers.ppu_mask.show_background() == 1
+            && (self.current_scanline < 240 || self.current_scanline >= 261)
+        {
+            match current_pixel_x {
+                256 => {
+                    let mut v = ScrollRegister::from(self.registers.v);
+
+                    if v.fine_y() < 7 {
+                        v.set_fine_y(v.fine_y() + 1);
+                    } else {
+                        v.set_fine_y(0);
+
+                        match v.coarse_y() {
+                            29 => {
+                                v.set_coarse_y(0);
+                                v.set_nametable_select(v.nametable_select() ^ 0b10);
+                            }
+                            31 => {
+                                v.set_coarse_y(0);
+                            }
+                            _ => {
+                                v.set_coarse_y(v.coarse_y() + 1);
+                            }
+                        }
+                    }
+                    self.registers.v = v.into();
+                }
+                257 => {
+                    self.registers.v &= !0b100_00011111;
+                    self.registers.v |= self.registers.t & 0b100_00011111;
+                }
+                328 | 336 | 8..=256 => {
+                    if current_pixel_x.is_multiple_of(8) {
+                        let mut v = ScrollRegister::from(self.registers.v);
+
+                        if v.coarse_x() == 31 {
+                            v.set_coarse_x(0);
+                            v.set_nametable_select(v.nametable_select() ^ 0b01);
+                        } else {
+                            v.set_coarse_x(v.coarse_x() + 1);
+                        }
+
+                        self.registers.v = v.into();
+                    }
+                }
+                _ => (),
+            }
         }
 
         self.current_cycle += 1;
@@ -335,6 +409,23 @@ impl Ppu {
                 self.current_scanline = 0;
                 self.informed_frame_ready = false;
             }
+        }
+    }
+
+    fn render_sprites(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
+        let mut sprites =
+            vec![OAMSprite::from_bytes(&[0, 0, 0, 0], false); self.scanline_sprites_count];
+        self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
+        for sprite in sprites
+            .iter()
+            .filter(|s| {
+                let x = s.get_x() as u16;
+                x <= current_pixel_x && current_pixel_x < x + 8
+            })
+            .rev()
+        // reverse to prioritise lower indexes in oam
+        {
+            self.render_sprite(current_pixel_x, current_pixel_y, *sprite);
         }
     }
 
@@ -361,30 +452,32 @@ impl Ppu {
         }
     }
 
-    fn render_background(
-        &mut self,
-        current_pixel_x: u16,
-        current_pixel_y: u16,
-        current_tile_x: u16,
-        current_tile_y: u16,
-    ) {
-        // Visible scanlines
+    fn _old_render_background(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
+        let current_tile_x = current_pixel_x / 8;
+        let current_tile_y = current_pixel_y / 8;
+
         let nametable_address = self.registers.ppu_ctrl.get_base_nametable_address();
         let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
-        let pattern_table_address = self.registers.ppu_ctrl.get_background_pattern_table_address();
+        let pattern_table_address = self
+            .registers
+            .ppu_ctrl
+            .get_background_pattern_table_address();
 
-        // First we get the nametable entry for the current pixel
-        let nametable_index = current_tile_x + current_tile_y * 32;
-        let nametable_entry = self.ppu_bus.read_u8(nametable_address + nametable_index);
+        let nametable_entry = {
+            let nametable_index = current_tile_x + current_tile_y * 32;
+            self.ppu_bus.read_u8(nametable_address + nametable_index) //
+        };
 
-        // We want to get the matching pallette for the nametable entry
-        let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
-        let attribute_byte = self
-            .ppu_bus
-            .read_u8(attribute_table_address + attribute_table_index);
-        let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
-        let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
-        let pallette_address = PALLETTE_TABLE_START + (pallette_table_index as u16 * 4);
+        let pallette_address = {
+            let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
+            let attribute_byte = self
+                .ppu_bus
+                .read_u8(attribute_table_address + attribute_table_index);
+            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
+            let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
+
+            PALLETTE_TABLE_START + (pallette_table_index as u16 * 4)
+        };
 
         let pixel_color = self.get_pattern_pixel(
             pattern_table_address,
@@ -401,11 +494,58 @@ impl Ppu {
         self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
     }
 
+    fn render_background(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
+        let v = self.registers.v;
+        let parsed_v = ScrollRegister::from(v);
+
+        let current_tile_x = parsed_v.coarse_x() as u16;
+        let current_tile_y = parsed_v.coarse_y() as u16;
+
+        // println!("({current_tile_x}, {current_tile_y}) ({}, {})", self.registers.x, parsed_v.fine_y());
+
+        let pattern_table_address = self
+            .registers
+            .ppu_ctrl
+            .get_background_pattern_table_address();
+
+        let nametable_entry = {
+            self.ppu_bus.read_u8(0x2000 | (v & 0x0FFF)) //
+        };
+
+        let pallette_address = {
+            let attribute_byte = self
+                .ppu_bus
+                .read_u8(0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07));
+            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
+            let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
+
+            PALLETTE_TABLE_START + (pallette_table_index as u16 * 4)
+        };
+
+        let future_pixel_color = self.get_pattern_pixel(
+            pattern_table_address,
+            nametable_entry as u16,
+            parsed_v.fine_y() as u16,
+            current_pixel_x % 8, // + self.registers.x as u16 % 8,
+        );
+
+        self.next_pixels.push_back(future_pixel_color);
+        let pixel_color = self.next_pixels.pop_front().unwrap();
+
+        let pallette_value = self.get_pallette_value(pallette_address, pixel_color as u16);
+        if current_pixel_x < 256 {
+            self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] =
+                pixel_color != 0;
+            self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
+        }
+    }
+
     fn render_sprite(&mut self, current_pixel_x: u16, current_pixel_y: u16, sprite: OAMSprite) {
         // reverse this to give the first sprite most priority
         let mut current_sprite_line = self.current_scanline as u8 - sprite.get_rendered_y() as u8;
         if sprite.get_attributes().flip_vertical() == 1 {
-            current_sprite_line = self.registers.ppu_ctrl.get_sprite_height() - 1 - current_sprite_line;
+            current_sprite_line =
+                self.registers.ppu_ctrl.get_sprite_height() - 1 - current_sprite_line;
         }
 
         let mut current_sprite_x = current_pixel_x as u8 - sprite.get_x();
@@ -427,7 +567,6 @@ impl Ppu {
             }
         };
 
-        // let tile_index = sprite.get_tile_index() as u16;
         let tile_index = if self.registers.ppu_ctrl.get_sprite_height() == 16
             && ((current_sprite_line >= 8 && sprite.get_attributes().flip_vertical() == 0)
                 || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1))
@@ -443,7 +582,9 @@ impl Ppu {
         let pixel_color =
             self.get_pattern_pixel(pattern_table, tile_index, current_tile_y, current_tile_x);
 
-        if sprite.is_sprite_0() && self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] {
+        if sprite.is_sprite_0()
+            && self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize]
+        {
             self.registers.ppu_status.set_sprite_zero_hit(1);
         }
 
@@ -471,27 +612,22 @@ impl Ppu {
         &mut self,
         pattern_table: u16,
         tile_index: u16,
-        tile_y: u16,
-        tile_x: u16,
+        fine_y: u16,
+        fine_x: u16,
     ) -> u8 {
-        let pattern_lsb_address = pattern_table + (tile_index * 16 + 0) + tile_y;
-        let pattern_msb_address = pattern_table + (tile_index * 16 + 8) + tile_y;
+        let pattern_lsb_address = pattern_table + (tile_index * 16 + 0) + fine_y;
+        let pattern_msb_address = pattern_table + (tile_index * 16 + 8) + fine_y;
 
         let pattern_byte_lsb = self.ppu_bus.read_u8(pattern_lsb_address);
         let pattern_byte_msb = self.ppu_bus.read_u8(pattern_msb_address);
 
-        let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb, tile_x as u8);
-        let current_pixel_color_msb = select_bit_n(pattern_byte_msb, tile_x as u8);
+        let current_pixel_color_lsb = select_bit_n(pattern_byte_lsb, fine_x as u8);
+        let current_pixel_color_msb = select_bit_n(pattern_byte_msb, fine_x as u8);
         let pixel_color = current_pixel_color_lsb + (current_pixel_color_msb << 1);
         pixel_color
     }
 
-    fn draw_pixel(
-        &mut self,
-        current_pixel_x: u16,
-        current_pixel_y: u16,
-        mut color: usize,
-    ) {
+    fn draw_pixel(&mut self, current_pixel_x: u16, current_pixel_y: u16, mut color: usize) {
         if self.registers.ppu_mask.grayscale() == 1 {
             color &= 0x30;
         }
