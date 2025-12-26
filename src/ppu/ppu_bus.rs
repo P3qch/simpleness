@@ -67,17 +67,15 @@ impl PPUBus {
     fn apply_nametable_arrangement(&self, mut nametable_addr: usize) -> usize {
         match self.nametable_arrangement {
             NametableArrangement::Vertical => {
-                if let 0x400..0x800 | 0xc00..0x1000 = nametable_addr {
-                    nametable_addr -= 0x400;
+                match nametable_addr {
+                    ..0x800 => nametable_addr & 0x3ff,
+                    0x800.. => (nametable_addr & 0x3ff) + 0x400
                 }
             }
             NametableArrangement::Horizontal => {
-                if nametable_addr >= 0x800 {
-                    nametable_addr -= 0x800;
-                }
+                nametable_addr & 0x7ff
             }
         }
-        nametable_addr
     }
     
     pub fn write_u8(&mut self, addr: u16, data: u8) {

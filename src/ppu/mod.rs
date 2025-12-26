@@ -7,7 +7,10 @@ mod ppu_registers;
 mod ppu_status;
 
 use std::{
-    collections::VecDeque, io::{BufReader, Cursor, Read}, os::raw, vec
+    collections::VecDeque,
+    io::{BufReader, Cursor, Read},
+    os::raw,
+    vec,
 };
 
 pub use ppu_bus::NametableArrangement;
@@ -126,6 +129,17 @@ pub struct Ppu {
     oam_data: [u8; 0x100],
     oam_addr: u8,
 
+    // shifters and stuff
+    bg_nametable_byte: u8,
+    bg_attribute_byte: u8,
+    bg_pattern_lsbits: u8,
+    bg_pattern_msbits: u8,
+
+    bg_shifter_pattern_lobyte: u16,
+    bg_shifter_pattern_hibyte: u16,
+    bg_shifter_attribute_lobyte: u16,
+    bg_shifter_attribute_hibyte: u16,
+
     scanline_sprites: [OAMSprite; 8],
     scanline_sprites_count: usize,
 
@@ -148,11 +162,32 @@ impl Ppu {
             should_nmi: false,
             oam_data: [0; 0x100],
             oam_addr: 0,
+            bg_nametable_byte: 0,
+            bg_attribute_byte: 0,
+            bg_pattern_lsbits: 0,
+            bg_pattern_msbits: 0,
+
+            bg_shifter_pattern_lobyte: 0,
+            bg_shifter_pattern_hibyte: 0,
+            bg_shifter_attribute_lobyte: 0,
+            bg_shifter_attribute_hibyte: 0,
+
             scanline_sprites: [OAMSprite::from_bytes(&[0u8; 4], false); 8],
             scanline_sprites_count: 0,
             opaque_bg_pixel_table: [[false; 256]; 240],
             next_pixels: VecDeque::from([0; 0x10]), // pixels are emitted before.
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.bg_nametable_byte = 0;
+        self.bg_attribute_byte = 0;
+        self.bg_pattern_lsbits = 0;
+        self.bg_pattern_msbits = 0;
+        self.bg_shifter_pattern_lobyte = 0;
+        self.bg_shifter_pattern_hibyte = 0;
+        self.bg_shifter_attribute_lobyte = 0;
+        self.bg_shifter_attribute_hibyte = 0;
     }
 
     pub fn set_nametable_arrangement(&mut self, mode: NametableArrangement) {
@@ -253,14 +288,11 @@ impl Ppu {
 
             OAMADDR => {
                 // Sets the OAM address for subsequent OAMDATA writes
-                // Not implemented yet
-
                 self.oam_addr = value;
             }
 
             OAMDATA => {
                 // Writes a byte to OAM at the current OAM address, then increments the OAM address
-
                 if !self.is_rendering() {
                     self.oam_data[self.oam_addr as usize] = value;
                     self.oam_addr = self.oam_addr.wrapping_add(1);
@@ -268,18 +300,16 @@ impl Ppu {
             }
 
             PPUSCROLL => {
-                if !self.is_rendering() {
-                    if !self.registers.w {
-                        new_t.set_coarse_x((value >> 3) & 0b11111);
-                        self.registers.x = value & 0b111;
-                    } else {
-                        new_t.set_coarse_y((value >> 3) & 0b11111);
-                        new_t.set_fine_y(value & 0b111);
-                    }
-
-                    self.registers.w = !self.registers.w;
-                    self.registers.t = new_t.into();
+                if !self.registers.w {
+                    new_t.set_coarse_x((value >> 3) & 0b11111);
+                    self.registers.x = value & 0b111;
+                } else {
+                    new_t.set_coarse_y((value >> 3) & 0b11111);
+                    new_t.set_fine_y(value & 0b111);
                 }
+
+                self.registers.w = !self.registers.w;
+                self.registers.t = new_t.into();
             }
 
             PPUADDR => {
@@ -313,95 +343,224 @@ impl Ppu {
     }
 
     pub fn tick(&mut self) {
-        let current_pixel_x = (self.current_cycle % 341) as u16;
-        let current_pixel_y = self.current_scanline as u16;
+        let rendering_enabled = self.registers.ppu_mask.show_background() == 1
+            || self.registers.ppu_mask.show_sprites() == 1;
+        match self.current_scanline {
+            0..=239 | 261 => {
+                if self.current_scanline == 0 && self.current_cycle == 0 {
+                    self.current_cycle = 1
+                }
 
-        if current_pixel_y < 240 && current_pixel_x < 256 {
-            if self.registers.ppu_mask.show_background() == 1 {
-                self._old_render_background(current_pixel_x, current_pixel_y);
-            }
-            if self.registers.ppu_mask.show_sprites() == 1 {
-                self.render_sprites(current_pixel_x, current_pixel_y);
-            }
-        } else if self.current_scanline == 241 && current_pixel_x == 1 {
-            // Entering VBlank
-            self.registers.ppu_status.set_vblank(1);
+                if self.registers.ppu_mask.show_sprites() == 1 && self.current_cycle == 320 {
+                    self.do_sprite_evaluation();
+                }
 
-            if self.registers.ppu_ctrl.vblank_nmi_enable() == 1 {
-                self.call_nmi();
-            }
-        } else if self.current_scanline == 261 {
-            // Pre-render scanline
-            if current_pixel_x == 1 {
-                self.registers.ppu_status.set_vblank(0);
-                self.registers.ppu_status.set_sprite_zero_hit(0);
-                self.had_pre_render_scanline = true;
-            }
-            if let 280..304 = current_pixel_x {
-                self.registers.v &= !0b1111011_11100000;
-                self.registers.v |= self.registers.t & 0b1111011_11100000
-            }
-        } else if 320 == current_pixel_x
-            && (self.current_scanline < 240 || self.current_scanline == 261)
-        {
-            // supposedly sprite evaluation happens in x = 257..=320 but i'm going to do it in one go because lazy
-            // the sprite tile loading interval
-            self.do_sprite_evaluation();
+                if self.current_scanline == 261 {
+                    if self.current_cycle == 1 {
+                        self.registers.ppu_status.set_vblank(0);
+                        self.registers.ppu_status.set_sprite_zero_hit(0);
+                        self.registers.ppu_status.set_sprite_overflow(0);
+                        self.had_pre_render_scanline = true;
+                    }
+                    if let 280..=304 = self.current_cycle
+                        && rendering_enabled
+                    {
+                        // vert(v) = vert(t)
+                        self.registers.v &= !0b1111011_11100000;
+                        self.registers.v |= self.registers.t & 0b1111011_11100000
+                    }
+                }
 
-            self.oam_addr = 0;
+                if let 1..=256 | 321..=336 = self.current_cycle
+                    && rendering_enabled
+                {
+                    self.bg_shifter_pattern_lobyte <<= 1;
+                    self.bg_shifter_pattern_hibyte <<= 1;
+                    self.bg_shifter_attribute_lobyte <<= 1;
+                    self.bg_shifter_attribute_hibyte <<= 1;
+
+                    let v = self.registers.v;
+                    let parsed_v = ScrollRegister::from(v);
+
+                    match (self.current_cycle - 1) & 0b111 {
+                        0 => {
+                            // find next nametable byte
+                            self.bg_nametable_byte = self.ppu_bus.read_u8(0x2000 | (v & 0x0FFF));
+                        }
+                        2 => {
+                            // find the pallette to be used on next tile
+                            let quadrant = ((parsed_v.coarse_y() % 4) / 2) * 2
+                                + ((parsed_v.coarse_x() % 4) / 2);
+                            let attribute_byte = self.ppu_bus.read_u8(
+                                0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07),
+                            );
+                            self.bg_attribute_byte = (attribute_byte >> (quadrant * 2)) & 0b11;
+                        }
+                        4 => {
+                            // find next pattern lsb
+                            let addr = self
+                                .registers
+                                .ppu_ctrl
+                                .get_background_pattern_table_address()
+                                + (self.bg_nametable_byte as u16 * 16 + 0)
+                                + parsed_v.fine_y() as u16;
+                            self.bg_pattern_lsbits = self.ppu_bus.read_u8(addr);
+                        }
+                        6 => {
+                            // find next pattern msb
+                            let addr = self
+                                .registers
+                                .ppu_ctrl
+                                .get_background_pattern_table_address()
+                                + (self.bg_nametable_byte as u16 * 16 + 8)
+                                + parsed_v.fine_y() as u16;
+                            self.bg_pattern_msbits = self.ppu_bus.read_u8(addr);
+                        }
+                        7 => {
+                            // inc hori(v)
+                            let mut v: ScrollRegister = ScrollRegister::from(self.registers.v);
+
+                            if v.coarse_x() == 31 {
+                                v.set_coarse_x(0);
+                                v.set_nametable_select(v.nametable_select() ^ 0b01);
+                            } else {
+                                v.set_coarse_x(v.coarse_x() + 1);
+                            }
+                            if rendering_enabled {
+                                self.registers.v = v.into();
+                            }
+
+                            // load shift registers
+                            self.bg_shifter_pattern_lobyte = (self.bg_shifter_pattern_lobyte
+                                & 0xff00)
+                                | self.bg_pattern_lsbits as u16;
+                            self.bg_shifter_pattern_hibyte = (self.bg_shifter_pattern_hibyte
+                                & 0xff00)
+                                | self.bg_pattern_msbits as u16;
+
+                            if self.bg_attribute_byte & 0b01 != 0 {
+                                self.bg_shifter_attribute_lobyte =
+                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0xff;
+                            } else {
+                                self.bg_shifter_attribute_lobyte =
+                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0x00;
+                            }
+
+                            if self.bg_attribute_byte & 0b10 != 0 {
+                                self.bg_shifter_attribute_hibyte =
+                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0xff;
+                            } else {
+                                self.bg_shifter_attribute_hibyte =
+                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0x00;
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+                if rendering_enabled {
+                    match self.current_cycle {
+                        256 => {
+                            // increment vert(v)
+                            let mut v = ScrollRegister::from(self.registers.v);
+
+                            if v.fine_y() < 7 {
+                                v.set_fine_y(v.fine_y() + 1);
+                            } else {
+                                v.set_fine_y(0);
+
+                                match v.coarse_y() {
+                                    29 => {
+                                        v.set_coarse_y(0);
+                                        v.set_nametable_select(v.nametable_select() ^ 0b10);
+                                    }
+                                    31 => {
+                                        v.set_coarse_y(0);
+                                    }
+                                    _ => {
+                                        v.set_coarse_y(v.coarse_y() + 1);
+                                    }
+                                }
+                            }
+                            self.registers.v = v.into();
+                        }
+                        257 => {
+                            // hori(v) = hori(t)
+                            self.registers.v &= !0b100_00011111;
+                            self.registers.v |= self.registers.t & 0b100_00011111;
+                        }
+                        _ => (),
+                    }
+                }
+            }
+
+            241 => {
+                // vblank scanlines
+                if self.current_cycle == 1 {
+                    // Entering VBlank
+                    self.registers.ppu_status.set_vblank(1);
+
+                    if self.registers.ppu_ctrl.vblank_nmi_enable() == 1 {
+                        self.call_nmi();
+                    }
+                }
+            }
+
+            _ => (),
         }
 
-        if self.registers.ppu_mask.show_background() == 1
-            && (self.current_scanline < 240 || self.current_scanline >= 261)
-        {
-            match current_pixel_x {
-                256 => {
-                    let mut v = ScrollRegister::from(self.registers.v);
+        if self.current_cycle >= 1 && self.current_scanline < 240 && self.current_cycle < 256 {
+            if self.registers.ppu_mask.show_background() == 1 {
+                let bit_selector = 0x8000 >> (self.registers.x as u16);
+                let pixel_color_lsb: u16 = if self.bg_shifter_pattern_lobyte & bit_selector > 0 {
+                    1
+                } else {
+                    0
+                };
+                let pixel_color_msb: u16 = if self.bg_shifter_pattern_hibyte & bit_selector > 0 {
+                    1
+                } else {
+                    0
+                };
+                let pixel_color = pixel_color_lsb | (pixel_color_msb << 1);
 
-                    if v.fine_y() < 7 {
-                        v.set_fine_y(v.fine_y() + 1);
-                    } else {
-                        v.set_fine_y(0);
+                let pallette_index_lsb: u16 = if self.bg_shifter_attribute_lobyte & bit_selector > 0
+                {
+                    1
+                } else {
+                    0
+                };
+                let pallette_index_msb: u16 = if self.bg_shifter_attribute_hibyte & bit_selector > 0
+                {
+                    1
+                } else {
+                    0
+                };
+                let pallette_index = pallette_index_lsb | (pallette_index_msb << 1);
 
-                        match v.coarse_y() {
-                            29 => {
-                                v.set_coarse_y(0);
-                                v.set_nametable_select(v.nametable_select() ^ 0b10);
-                            }
-                            31 => {
-                                v.set_coarse_y(0);
-                            }
-                            _ => {
-                                v.set_coarse_y(v.coarse_y() + 1);
-                            }
-                        }
-                    }
-                    self.registers.v = v.into();
-                }
-                257 => {
-                    self.registers.v &= !0b100_00011111;
-                    self.registers.v |= self.registers.t & 0b100_00011111;
-                }
-                328 | 336 | 8..=256 => {
-                    if current_pixel_x.is_multiple_of(8) {
-                        let mut v = ScrollRegister::from(self.registers.v);
-
-                        if v.coarse_x() == 31 {
-                            v.set_coarse_x(0);
-                            v.set_nametable_select(v.nametable_select() ^ 0b01);
-                        } else {
-                            v.set_coarse_x(v.coarse_x() + 1);
-                        }
-
-                        self.registers.v = v.into();
-                    }
-                }
-                _ => (),
+                let color = if pixel_color != 0 {
+                    self.opaque_bg_pixel_table[self.current_scanline as usize]
+                        [(self.current_cycle - 1) as usize] = true;
+                    self.ppu_bus
+                        .read_u8(PALLETTE_TABLE_START + (pallette_index * 4) + pixel_color)
+                } else {
+                    self.ppu_bus.read_u8(PALLETTE_TABLE_START)
+                } as usize;
+                self.draw_pixel(
+                    (self.current_cycle - 1) as u16,
+                    self.current_scanline as u16,
+                    color,
+                );
+            }
+            if self.registers.ppu_mask.show_sprites() == 1 && self.current_scanline >= 1 {
+                self.render_sprites(
+                    (self.current_cycle - 1) as u16,
+                    self.current_scanline as u16,
+                );
             }
         }
 
         self.current_cycle += 1;
-        if self.current_cycle >= 341 {
+        if self.current_cycle > 340 {
             self.current_cycle = 0;
             self.current_scanline += 1;
 
@@ -413,19 +572,13 @@ impl Ppu {
     }
 
     fn render_sprites(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
-        let mut sprites =
-            vec![OAMSprite::from_bytes(&[0, 0, 0, 0], false); self.scanline_sprites_count];
-        self.scanline_sprites[..self.scanline_sprites_count].clone_into(&mut sprites);
-        for sprite in sprites
-            .iter()
-            .filter(|s| {
-                let x = s.get_x() as u16;
-                x <= current_pixel_x && current_pixel_x < x + 8
-            })
-            .rev()
-        // reverse to prioritise lower indexes in oam
-        {
-            self.render_sprite(current_pixel_x, current_pixel_y, *sprite);
+        for i in 0..self.scanline_sprites_count {
+            let sprite = self.scanline_sprites[i];
+            let x = sprite.get_x() as u16;
+            if current_pixel_x >= x && current_pixel_x < x + 8 {
+                self.render_sprite(current_pixel_x, current_pixel_y, sprite);
+                break; // Stop after the first opaque pixel (OAM priority)
+            }
         }
     }
 
@@ -441,6 +594,10 @@ impl Ppu {
 
             let next_scanline = ((self.current_scanline + 1) % 262) as u16; // it's aight to cast because of scanline range
             let sprite_height = self.registers.ppu_ctrl.get_sprite_height() as u16;
+
+            if self.scanline_sprites_count >= 8 {
+                self.registers.ppu_status.set_sprite_overflow(1);
+            }
             if sprite.get_rendered_y() <= next_scanline
                 && next_scanline < sprite.get_rendered_y() + sprite_height
                 && self.scanline_sprites_count < 8
@@ -449,94 +606,6 @@ impl Ppu {
                 self.scanline_sprites[self.scanline_sprites_count] = sprite;
                 self.scanline_sprites_count += 1;
             }
-        }
-    }
-
-    fn _old_render_background(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
-        let current_tile_x = current_pixel_x / 8;
-        let current_tile_y = current_pixel_y / 8;
-
-        let nametable_address = self.registers.ppu_ctrl.get_base_nametable_address();
-        let attribute_table_address = nametable_address + ATTRIBUTE_TABLE_OFFSET;
-        let pattern_table_address = self
-            .registers
-            .ppu_ctrl
-            .get_background_pattern_table_address();
-
-        let nametable_entry = {
-            let nametable_index = current_tile_x + current_tile_y * 32;
-            self.ppu_bus.read_u8(nametable_address + nametable_index) //
-        };
-
-        let pallette_address = {
-            let attribute_table_index = (current_tile_x / 4) + (current_tile_y / 4) * 8;
-            let attribute_byte = self
-                .ppu_bus
-                .read_u8(attribute_table_address + attribute_table_index);
-            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
-            let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
-
-            PALLETTE_TABLE_START + (pallette_table_index as u16 * 4)
-        };
-
-        let pixel_color = self.get_pattern_pixel(
-            pattern_table_address,
-            nametable_entry as u16,
-            current_pixel_y % 8,
-            current_pixel_x % 8,
-        );
-
-        self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] =
-            pixel_color != 0;
-
-        let pallette_value = self.get_pallette_value(pallette_address, pixel_color as u16);
-
-        self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
-    }
-
-    fn render_background(&mut self, current_pixel_x: u16, current_pixel_y: u16) {
-        let v = self.registers.v;
-        let parsed_v = ScrollRegister::from(v);
-
-        let current_tile_x = parsed_v.coarse_x() as u16;
-        let current_tile_y = parsed_v.coarse_y() as u16;
-
-        // println!("({current_tile_x}, {current_tile_y}) ({}, {})", self.registers.x, parsed_v.fine_y());
-
-        let pattern_table_address = self
-            .registers
-            .ppu_ctrl
-            .get_background_pattern_table_address();
-
-        let nametable_entry = {
-            self.ppu_bus.read_u8(0x2000 | (v & 0x0FFF)) //
-        };
-
-        let pallette_address = {
-            let attribute_byte = self
-                .ppu_bus
-                .read_u8(0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07));
-            let quadrant = ((current_tile_y % 4) / 2) * 2 + ((current_tile_x % 4) / 2);
-            let pallette_table_index = (attribute_byte >> (quadrant * 2)) & 0b11;
-
-            PALLETTE_TABLE_START + (pallette_table_index as u16 * 4)
-        };
-
-        let future_pixel_color = self.get_pattern_pixel(
-            pattern_table_address,
-            nametable_entry as u16,
-            parsed_v.fine_y() as u16,
-            current_pixel_x % 8, // + self.registers.x as u16 % 8,
-        );
-
-        self.next_pixels.push_back(future_pixel_color);
-        let pixel_color = self.next_pixels.pop_front().unwrap();
-
-        let pallette_value = self.get_pallette_value(pallette_address, pixel_color as u16);
-        if current_pixel_x < 256 {
-            self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize] =
-                pixel_color != 0;
-            self.draw_pixel(current_pixel_x, current_pixel_y, pallette_value as usize);
         }
     }
 
@@ -571,7 +640,7 @@ impl Ppu {
             && ((current_sprite_line >= 8 && sprite.get_attributes().flip_vertical() == 0)
                 || (current_sprite_line < 8 && sprite.get_attributes().flip_vertical() == 1))
         {
-            sprite.get_tile_index() + 1
+            sprite.get_tile_index() & 0xfe + 1
         } else {
             sprite.get_tile_index()
         } as u16;
@@ -584,6 +653,7 @@ impl Ppu {
 
         if sprite.is_sprite_0()
             && self.opaque_bg_pixel_table[current_pixel_y as usize][current_pixel_x as usize]
+            && pixel_color != 0
         {
             self.registers.ppu_status.set_sprite_zero_hit(1);
         }

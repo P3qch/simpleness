@@ -1,4 +1,5 @@
 use modular_bitfield::prelude::*;
+use std::fmt::Debug;
 
 #[derive(Clone, Copy)]
 #[bitfield(bits = 8)]
@@ -10,7 +11,19 @@ pub struct OAMSpriteAttributes {
     pub flip_vertical: B1,
 }
 
-#[derive(Clone, Copy)]
+impl Debug for OAMSpriteAttributes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAMSpriteAttributes")
+            .field("pallette", &self.pallette())
+            .field("priority", &self.priority())
+            .field("flip_horizontal", &self.flip_horizontal())
+            .field("flip_vertical", &self.flip_vertical())
+            
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct OAMSprite {
     y: u8,
     tile_index: u8,

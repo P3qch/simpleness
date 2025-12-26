@@ -111,6 +111,7 @@ impl<'a> ApplicationHandler<()> for NesApp<'a> {
                             self.cpu.bus.set_mapper(Rc::new(RefCell::new(rom.mapper)));
                             self.cpu.bus.ppu.set_nametable_arrangement(rom.flag6.get_nametable_mirroring_mode());
                             self.cpu.reset();
+                            self.cpu.bus.ppu.reset();
                         }
                     }
                 }
