@@ -288,7 +288,9 @@ impl Ppu {
 
             OAMADDR => {
                 // Sets the OAM address for subsequent OAMDATA writes
-                self.oam_addr = value;
+                if !self.is_rendering() {
+                    self.oam_addr = value;
+                }
             }
 
             OAMDATA => {
@@ -348,7 +350,7 @@ impl Ppu {
         match self.current_scanline {
             0..=239 | 261 => {
                 if self.current_scanline == 0 && self.current_cycle == 0 {
-                    self.current_cycle = 1
+                    self.current_cycle = 1;
                 }
 
                 if self.registers.ppu_mask.show_sprites() == 1 && self.current_cycle == 320 {
@@ -384,13 +386,37 @@ impl Ppu {
 
                     match (self.current_cycle - 1) & 0b111 {
                         0 => {
+                            // load shift registers
+                            self.bg_shifter_pattern_lobyte = (self.bg_shifter_pattern_lobyte
+                                & 0xff00)
+                                | self.bg_pattern_lsbits as u16;
+                            self.bg_shifter_pattern_hibyte = (self.bg_shifter_pattern_hibyte
+                                & 0xff00)
+                                | self.bg_pattern_msbits as u16;
+
+                            if self.bg_attribute_byte & 0b01 != 0 {
+                                self.bg_shifter_attribute_lobyte =
+                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0xff;
+                            } else {
+                                self.bg_shifter_attribute_lobyte =
+                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0x00;
+                            }
+
+                            if self.bg_attribute_byte & 0b10 != 0 {
+                                self.bg_shifter_attribute_hibyte =
+                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0xff;
+                            } else {
+                                self.bg_shifter_attribute_hibyte =
+                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0x00;
+                            }
+
                             // find next nametable byte
                             self.bg_nametable_byte = self.ppu_bus.read_u8(0x2000 | (v & 0x0FFF));
                         }
                         2 => {
                             // find the pallette to be used on next tile
-                            let quadrant = ((parsed_v.coarse_y() % 4) / 2) * 2
-                                + ((parsed_v.coarse_x() % 4) / 2);
+                            let quadrant = (((parsed_v.coarse_y() >> 1) & 1) << 1)
+                                | ((parsed_v.coarse_x() >> 1) & 1);
                             let attribute_byte = self.ppu_bus.read_u8(
                                 0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07),
                             );
@@ -430,29 +456,6 @@ impl Ppu {
                                 self.registers.v = v.into();
                             }
 
-                            // load shift registers
-                            self.bg_shifter_pattern_lobyte = (self.bg_shifter_pattern_lobyte
-                                & 0xff00)
-                                | self.bg_pattern_lsbits as u16;
-                            self.bg_shifter_pattern_hibyte = (self.bg_shifter_pattern_hibyte
-                                & 0xff00)
-                                | self.bg_pattern_msbits as u16;
-
-                            if self.bg_attribute_byte & 0b01 != 0 {
-                                self.bg_shifter_attribute_lobyte =
-                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0xff;
-                            } else {
-                                self.bg_shifter_attribute_lobyte =
-                                    (self.bg_shifter_attribute_lobyte & 0xff00) | 0x00;
-                            }
-
-                            if self.bg_attribute_byte & 0b10 != 0 {
-                                self.bg_shifter_attribute_hibyte =
-                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0xff;
-                            } else {
-                                self.bg_shifter_attribute_hibyte =
-                                    (self.bg_shifter_attribute_hibyte & 0xff00) | 0x00;
-                            }
                         }
                         _ => (),
                     }
@@ -508,8 +511,9 @@ impl Ppu {
             _ => (),
         }
 
-        if self.current_cycle >= 1 && self.current_scanline < 240 && self.current_cycle < 256 {
+        if self.current_cycle >= 1 && self.current_scanline < 240 && self.current_cycle <= 256 {
             if self.registers.ppu_mask.show_background() == 1 {
+
                 let bit_selector = 0x8000 >> (self.registers.x as u16);
                 let pixel_color_lsb: u16 = if self.bg_shifter_pattern_lobyte & bit_selector > 0 {
                     1
@@ -541,10 +545,11 @@ impl Ppu {
                     self.opaque_bg_pixel_table[self.current_scanline as usize]
                         [(self.current_cycle - 1) as usize] = true;
                     self.ppu_bus
-                        .read_u8(PALLETTE_TABLE_START + (pallette_index * 4) + pixel_color)
+                        .read_u8(PALLETTE_TABLE_START | (pallette_index << 2) | pixel_color)
                 } else {
                     self.ppu_bus.read_u8(PALLETTE_TABLE_START)
                 } as usize;
+
                 self.draw_pixel(
                     (self.current_cycle - 1) as u16,
                     self.current_scanline as u16,
@@ -577,7 +582,6 @@ impl Ppu {
             let x = sprite.get_x() as u16;
             if current_pixel_x >= x && current_pixel_x < x + 8 {
                 self.render_sprite(current_pixel_x, current_pixel_y, sprite);
-                break; // Stop after the first opaque pixel (OAM priority)
             }
         }
     }
